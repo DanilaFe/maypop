@@ -3,11 +3,15 @@ Here, I'll define what a Maypop "term" is.
 {{< todo >}}Let's use LaTeX for types and kinds and so on.{{< /todo >}}
 {{< todo >}}Let's be more clear about universe / type / etc{{< /todo >}}
 {{< todo >}}Extract the common typeclasses into a single class?{{< /todo >}}
+{{< todo >}}Increment variable references for free variables in substitution.{{< /todo >}}
 
 > {-# LANGUAGE FlexibleContexts #-}
 > module Language.Maypop.Syntax where
+> import Control.Applicative
 > import Control.Monad.Reader
 > import Control.Monad.Except
+> import Data.Bool
+> import Data.Set as Set
 
 We'll be using DeBrujin indices, so there will be no strings (and thus,
 no need to perform any complicated alpha renaming). We have the following
@@ -24,12 +28,60 @@ terms in the language:
 >     | App Term Term
 >     | Prod Term Term
 >     | Universe Universe
+>     deriving Eq
 
 For convenience, we combine the references to the various
 universes (__Prop__ and __Type(n)__) into a data type,
 `Universe`:
 
-> data Universe = Prop | Type Int
+> data Universe = Prop | Type Int deriving (Eq, Show)
+
+There are a few helpful functions we can implement on terms.
+One of these function is the classic substitution, which
+is crucial in beta reduction. DeBrujin indices make this
+fairly easy; we need not keep track of names or alpha renaming.
+All we have to do is keep track of what number refers to
+the variable we're substituting. This is done by incrementing
+the target number at abstractions and products (since they introduce
+their own bindings, and therefore shift the indices).
+
+> substitute :: Int -> Term -> Term -> Term
+> substitute n t (Ref m) | n == m = t
+> substitute n t (Abs t1 t2) = Abs (substitute n t t1) (substitute (n+1) t t2)
+> substitute n t (App t1 t2) = App (substitute n t t1) (substitute n t t2)
+> substitute n t (Prod t1 t2) = Prod (substitute n t t1) (substitute (n+1) t t2)
+> substitute _ _ t = t
+
+Another couple of helpful functions is `freeVars` and `occurs`. We'll use the latter
+in our pretty printer: after all, the function arrow \\(A\\rightarrow B\\) is
+a special case of the product type \\(\\Pi (a:A), B\\) where \\(a \\not\\in \\text{free}(B)\\).
+Finding free variables is easy enough: at any subexpression, any DeBrujin index that's
+greater than the number of surrounding abstractions or products is a free variable.
+
+> freeVars :: Term -> [Int]
+> freeVars t = Set.toList $ runReader (freeVars' t) 0
+>     where
+>         freeVars' (Ref i) = bool Set.empty (Set.singleton i) <$> asks (i>=) 
+>         freeVars' (Abs t1 t2) = liftA2 (<>) (freeVars' t1) (deepen $ freeVars' t2)
+>         freeVars' (App t1 t2) = liftA2 (<>) (freeVars' t1) (freeVars' t2)
+>         freeVars' (Prod t1 t2) = liftA2 (<>) (freeVars' t1) (deepen $ freeVars' t2)
+>         freeVars' _ = return Set.empty
+>         deepen m = (Set.map $ subtract 1) <$> local (+1) m
+> 
+> occurs :: Int -> Term -> Bool
+> occurs i = elem i . freeVars
+
+How about a pretty printer? Our language is simple enough. For now, let's not
+bother with inventing variable names, and just go with DeBrujin indices.
+
+> instance Show Term where
+>     show (Ref i) = show i
+>     show (Abs t1 t2) = "λ(_:" ++ show t1 ++ "). " ++ show t2
+>     show (App t1 t2) = show t1 ++ "(" ++ show t2 ++ ")"
+>     show (Prod t1 t2)
+>         | occurs 0 t2 = "Π(_:" ++ show t1 ++ "), " ++ show t2
+>         | otherwise = "(" ++ show t1 ++ ") → " ++ show t2
+>     show (Universe u) = show u
 
 Let's work on type inference a little. First, a little
 utility function to compute the type of a type. This
@@ -48,7 +100,7 @@ each type __Type(n)__ has type __Type(n+1)__.
 And now, type inference. This can fail, so let's define
 a type for type errors.
 
-> data TypeError = FreeVariable Int | NotUniverse
+> data TypeError = FreeVariable Int | NotUniverse | NotProduct | TypeError deriving Show
 
 Finally, on to the type inference function. We use the `MonadReader`
 typeclass to require read-only access to the local environment \\(\\Gamma\\).
@@ -56,17 +108,24 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 > infer :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m Term
 > infer (Ref n) = nth n <$> ask >>= maybe (throwError (FreeVariable n)) return
 > infer (Abs t b) = Prod t <$> extend t (infer b) -- TODO we can use extend' here
-> infer (App _ _) = undefined
+> infer (App f a) = do
+>     (ta, tb) <- inferP f
+>     targ <- infer a
+>     if ta == targ
+>      then return (substitute 0 a tb)
+>      else throwError TypeError
 > infer (Prod a b) = extend' a $ \ua -> inferU b >>= \ub -> return $ Universe $
 >     case ub of
 >         Prop -> Prop
 >         t -> joinU ua t
 > infer (Universe u) = return $ Universe $ nextUniverse u
 
-The type of a term is yet another term. However, not all terms consitute valid types.
-For instance, a lambda function is _not_ a type. Indeed, computation aside,
-only the `Universe` constructor corresponds to a valid type. We'll leave evaluation
-to a different function, and define a way to "cast" a term into a valid univere.
+There are a few utility functions in the above definitions; let's take a look
+at all of them in turn.  First up is `inferU`. The type of a term is yet another term.
+However, not all terms consitute valid types. For instance, a lambda function is _not_ a
+type. Indeed, computation aside, only the `Universe` constructor corresponds to a valid
+type. We'll leave evaluation to a different function, and define a way to "cast" a term
+into a valid univere.
 
 > intoUniverse :: MonadError TypeError m => Term -> m Universe
 > intoUniverse (Universe u) = return u
@@ -77,8 +136,19 @@ We can use this to define a "stronger" version of `infer`:
 > inferU :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m Universe
 > inferU t = infer t >>= intoUniverse
 
-There are a few utility functions in the above definitions; let's take a look
-at all of them in turn. First up is `nth`. It so happens that we need to safely access
+A similar casting function to `intoUniverse` is `intoProduct`, which helps
+us required that a term is a dependent product (this is used for the application rule).
+Once again, we do not concern ourselves with evaluation. Finally, we return the
+two terms composing a product type rather than returning a `Term`.
+
+> intoProduct :: MonadError TypeError m => Term -> m (Term, Term)
+> intoProduct (Prod a b) = return (a, b)
+> intoProduct _ = throwError NotProduct
+> 
+> inferP :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m (Term, Term)
+> inferP t = infer t >>= intoProduct
+
+Next up up is `nth`. It so happens that we need to safely access
 the nth element in our environment (which is just a stack) -- this is equivalent
 to looking up a variable name in a map. We do this in the most straightforward
 way imaginable:
