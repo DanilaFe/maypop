@@ -90,7 +90,7 @@ way imaginable:
 
 Next, we have to be careful about the rules of the Calculus of Constructions. We
 can't _just_ put a type straight from a lambda into the environment; it so happens
-that out types can be ill-formed! Thus, we need to first verify
+that our types can be ill-formed! Thus, we need to first verify
 the well-formedness of our argument type (for that, it must be well formed _and_ a universe). 
 Thus, extending the environment looks like the following:
 
