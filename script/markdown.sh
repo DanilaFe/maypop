@@ -1,1 +1,1 @@
-pandoc -f markdown+lhs $1 -t markdown --wrap=preserve | sed 's/{{\\</{{</g;s/\\>}}/>}}/g'
+pandoc -f markdown+lhs-smart $1 -t commonmark --wrap=preserve | sed 's/{{\\</{{</g;s/\\>}}/>}}/g'
