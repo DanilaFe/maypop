@@ -38,46 +38,42 @@ universes (__Prop__ and __Type(n)__) into a data type,
 
 > data Universe = Prop | Type Int deriving (Eq, Show)
 
+Having the data type by itself is quite boring.
 There are a few helpful functions we can implement on terms.
 One of these function is the classic substitution, which
-is crucial in beta reduction. DeBrujin indices make this
-fairly easy; we need not keep track of names or alpha renaming.
-All we have to do is keep track of what number refers to
-the variable we're substituting. This is done by incrementing
-the target number at abstractions and products (since they introduce
-their own bindings, and therefore shift the indices).
+is crucial in beta reduction. If we were to use strings for our
+terms, this would get fairly hairy. We'd need to perform alpha
+renaming, keep tracking of shadowing, and do all sorts of
+other things. However, DeBrujin indices make this
+fairly easy. All we have to do is keep track of what number refers to
+the variable we're substituting. When we enter the body of an abstraction,
+another variable gets the index 0, so every reference is "shifted" by one.
+Concretely, if we were replacing a variable `n` with a term outside an
+abstraction, inside the abstraction `n+1` refers to that same variable.
+We keep track of it accordingly.
 
 > substitute :: Int -> Term -> Term -> Term
-> substitute n t (Ref m) | n == m = t
-> substitute n t (Abs t1 t2) = Abs (substitute n t t1) (substitute (n+1) t t2)
-> substitute n t (App t1 t2) = App (substitute n t t1) (substitute n t t2)
-> substitute n t (Prod t1 t2) = Prod (substitute n t t1) (substitute (n+1) t t2)
-> substitute _ _ t = t
-
-Another couple of helpful functions is `freeVars` and `occurs`. We'll use the latter
-in our pretty printer: after all, the function arrow \\(A\\rightarrow B\\) is
-a special case of the product type \\(\\Pi (a:A), B\\) where \\(a \\not\\in \\text{free}(B)\\).
-Finding free variables is easy enough: at any subexpression, any DeBrujin index that's
-greater than the number of surrounding abstractions or products is a free variable.
-
-> freeVars :: Term -> [Int]
-> freeVars t = Set.toList $ runReader (freeVars' t) 0
+> substitute n t = sub 0
 >     where
->         freeVars' (Ref i) = bool Set.empty (Set.singleton i) <$> asks (i>=) 
->         freeVars' (Abs t1 t2) = liftA2 (<>) (freeVars' t1) (deepen $ freeVars' t2)
->         freeVars' (App t1 t2) = liftA2 (<>) (freeVars' t1) (freeVars' t2)
->         freeVars' (Prod t1 t2) = liftA2 (<>) (freeVars' t1) (deepen $ freeVars' t2)
->         freeVars' _ = return Set.empty
->         deepen m = (Set.map $ subtract 1) <$> local (+1) m
-> 
-> occurs :: Int -> Term -> Bool
-> occurs i = elem i . freeVars
+>         sub x (Ref m) | (n+x) == m = offsetFree x t
+>         sub x (Abs t1 t2) = Abs (sub x t1) (sub (x+1) t2)
+>         sub x (App t1 t2) = App (sub x t1) (sub x t2)
+>         sub x (Prod t1 t2) = Prod (sub x t1) (sub (x+1) t2)
+>         sub x t = t
 
-We can define a function that increments (or decrements)
-the free varibles in a given expression. This is useful for a variety of things, but
-most notably beta reduction: when we eliminate a lambda abstraction, the indices representing
-free variables need to be changed to ensure they're still pointing in the same spot.
-This leads to the following definition:
+It is perhaps surprising to see the use of `offsetFree` here. Why do we need to do anything
+special while substituting? We don't if `t` is a closed term (that is, if it doesn't have free
+variables). However, if it _does_ have free variables, we need to be careful to make sure that
+these variables are pointing to the same spot. The (0-indexed) term \\(\\lambda.1\\) refers
+to some free variable "outside", but if we substitute it into the body of another abstraction,
+getting \\(\\lambda.\\lambda.1\\), it now refers to the first argument of the function.
+This isn't what we want - a free variable reference in this term can't possibly refer to a
+variable that only exists inside _another_ lambda abstraction. It's easy to see that,
+to preserve free variables, we need to increment the free variables in the term being
+substituted by the number of surrounding lambda abstractions in the destination. To
+do so, we can define a function that increments (or decrements)
+the free varibles in a given expression. We once again use a Reader monad
+to keep track of the current number of surrounding lambda abstractions.
 
 > offsetFree :: Int -> Term -> Term
 > offsetFree o t = runReader (off t) 0
@@ -88,6 +84,29 @@ This leads to the following definition:
 >         off (Prod t1 t2) = liftA2 Prod (off t1) (deepen $ off t2)
 >         off t = return t
 >         deepen m = local (+1) m
+
+Another couple of helpful functions is `freeVars` and `occurs`. We'll use the latter
+in our pretty printer: after all, the function arrow \\(A\\rightarrow B\\) is
+a special case of the product type \\(\\Pi (a:A), B\\) where \\(a \\not\\in \\text{free}(B)\\).
+Finding free variables is easy enough: at any subexpression, any DeBrujin index that's
+greater than the number of surrounding abstractions or products is a free variable.
+We use a Reader monad to keep track of the current number of surrounding abstractions.
+
+> freeVars :: Term -> [Int]
+> freeVars t = Set.toList $ runReader (freeVars' t) 0
+>     where
+>         freeVars' (Ref i) = bool Set.empty (Set.singleton i) <$> asks (i>=) 
+>         freeVars' (Abs t1 t2) = liftA2 (<>) (freeVars' t1) (deepen $ freeVars' t2)
+>         freeVars' (App t1 t2) = liftA2 (<>) (freeVars' t1) (freeVars' t2)
+>         freeVars' (Prod t1 t2) = liftA2 (<>) (freeVars' t1) (deepen $ freeVars' t2)
+>         freeVars' _ = return Set.empty
+>         deepen m = (Set.map $ subtract 1) <$> local (+1) m
+
+Since `freeVars` finds _all_ free variables in a term, checking if a single variable
+occurs free becomes as simple as looking inside that list.
+
+> occurs :: Int -> Term -> Bool
+> occurs i = elem i . freeVars
 
 How about a pretty printer? Our language is simple enough. To make our expressions
 more readable to humans, we will use an infinite list of variable names, and
@@ -130,10 +149,12 @@ infinite list.
 > tailN :: Names -> Names
 > tailN (Cons _ xs) = xs
 
-Next, a convenience function. Assuming we have a State monad
-whose content is the infinite list of names, this will return
-the current name _and_ modify the state to no longer include
-that name.
+Now we have all the machinery in place for wrangling our infinite
+list of varaible names. We'll be using a State monad to keep track
+of which names we have and haven't used. We can thus write a convenient
+operation to generate a fresh name in such a context. This operation
+generates a new name (by peeking at the infinite list of names via `headN`)
+and then removes it from the list (by setting the name list to its tail via `tailN`).
 
 > popName :: MonadState Names m => m String
 > popName = gets headN <* modify tailN
@@ -163,11 +184,7 @@ And now, the pretty printer itself.
 Let's work on type inference a little. First, a little
 utility function to compute the type of a type. This
 is straight out of the paper on the Calculus of Inductive Constructions.
-{{< sidenote "right" "prop-set-note" "Prop" >}}
-I was wondering why we have two "bottom-level" types (one for propositions,
-and one for regular data). It turns out that only propositions can refer
-to themselves, or else the system is no longer consistent.
-{{< /sidenote >}} has the type __Type(0)__, and
+Prop has the type __Type(0)__, and
 each type __Type(n)__ has type __Type(n+1)__.
 
 > nextUniverse :: Universe -> Universe
