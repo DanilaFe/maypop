@@ -23,3 +23,14 @@ it does not require any other data types, and does not need to look into its arg
 
 > const_ :: Term
 > const_ = Abs (t 0) $ Abs (t 0) $ Abs (Ref 1) $ Abs (Ref 1) $ Ref 1
+
+Let's have an example of function application for once. Why not apply
+the identity function to `Prop`? We'll need to define a type-level
+identity function since `id_` can only accept type parameters of type `Type 0`,
+but our type parameter here _will be_ `Type 0`, a type parameter of type `Type 1`.
+
+> id_' :: Term
+> id_' = Abs (t 1) $ Abs (Ref 0) $ Ref 0
+> 
+> idProp :: Term
+> idProp = App (App id_' (t 0)) p
