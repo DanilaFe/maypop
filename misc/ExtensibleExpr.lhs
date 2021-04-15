@@ -28,6 +28,9 @@ context `m` into some value type `v`.
 
 > class Monad m => Eval a m v where
 >     eval :: a -> m v
+>
+> instance Eval (g (f a)) m v => Eval (Compose g f a) m v where
+>     eval (Comp g) = eval g
 
 Since numbers and booleans work on stuff that "can be converted"
 to and from numbers and booleans, and since we want to keep
@@ -117,5 +120,7 @@ And here's a boolean-and-number expression:
 > ex3 :: Fix (Compose Nums Bools)
 > ex3 = Fix $ Comp $ NumNext $ And (Fix $ Comp $ NumNext $ (B True)) (Fix $ Comp $ NumNext $ (B False))
 
-I don't know how to run it yet, because composition doesn't "just work"
-in the presence of other constraints like `Conv v Int` or `Conv v Bool`.
+Like the two before it, it can trivially be evaluated.
+
+> run3 :: Maybe Value
+> run3 = eval ex3
