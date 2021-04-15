@@ -1,0 +1,1 @@
+Type checking and inferring the types of Maypop terms.

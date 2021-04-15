@@ -1,0 +1,1 @@
+Evaluation (mostly using beta-reduction) of various Maypop terms.

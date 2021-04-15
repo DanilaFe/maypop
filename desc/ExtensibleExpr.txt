@@ -1,0 +1,1 @@
+An experiment in defining expressions that "compose" without issue.
