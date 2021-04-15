@@ -34,3 +34,51 @@ but our type parameter here _will be_ `Type 0`, a type parameter of type `Type 1
 > 
 > idProp :: Term
 > idProp = App (App id_' (t 0)) p
+
+Why don't we define some data types? Here's one for natural numbers.
+
+> nat :: Inductive
+> nat = Inductive
+>     { iParams = []
+>     , iArity = []
+>     , iSort = Type 0
+>     , iName = "ℕ"
+>     , iConstructors =
+>         [ Constructor { cParams = [], cIndices = [], cName = "O" }
+>         , Constructor { cParams = [ Ind nat ], cIndices = [], cName = "S" }
+>         ]
+>     }
+
+We can define a few quick shortcuts for writing down natural numbers. We'll
+use `n` to convert a Haskell `Int` into a natural number, `s` to refer to the
+natural succsessor function, and `o` to refer to the natural zero.
+
+> n :: Int -> Term
+> n 0 = Constr nat 0
+> n m = App (Constr nat 1) $ n (m-1)
+>
+> s :: Term -> Term
+> s = App (Constr nat 1)
+>
+> o :: Term
+> o = Constr nat 0
+
+And here's one for bounded natural numbers.
+
+> fin :: Inductive
+> fin = Inductive
+>     { iParams = []
+>     , iArity = [ Ind nat ]
+>     , iSort = Type 0
+>     , iName = "Fin"
+>     , iConstructors =
+>         [ Constructor { cParams = [ Ind nat ], cIndices = [ Ref 0 ], cName = "FZ" }
+>         , Constructor { cParams = [ Ind nat, App (Ind fin) (Ref 0) ], cIndices = [ App (Constr nat 1) (Ref 1) ], cName = "FS" }
+>         ]
+>     }
+>
+> fz :: Int -> Term
+> fz m = App (Constr fin 0) (n m)
+> 
+> fs :: Int -> Term -> Term
+> fs m = App (App (Constr fin 1) (n m))
