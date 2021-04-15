@@ -1,5 +1,7 @@
 Let's work on type inference a little.
 
+{{< todo >}}Seems like it would make sense to describe each case of Infer here.{{< /todo >}}
+
 > {-# LANGUAGE FlexibleContexts #-}
 > module Language.Maypop.Checking where
 > import Language.Maypop.Syntax
