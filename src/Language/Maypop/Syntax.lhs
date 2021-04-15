@@ -3,8 +3,7 @@ Here, I'll define what a Maypop "term" is.
 {{< todo >}}Let's use LaTeX for types and kinds and so on.{{< /todo >}}
 {{< todo >}}Let's be more clear about universe / type / etc{{< /todo >}}
 {{< todo >}}Extract the common typeclasses into a single class?{{< /todo >}}
-{{< todo >}}Increment variable references for free variables in substitution.{{< /todo >}}
-{{< todo >}}Move the explanation for nth earlier up.{{< /todo >}}
+{{< todo >}}Inductive stuff has names? How does equality work?{{< /todo >}}
 
 > {-# LANGUAGE FlexibleContexts #-}
 > module Language.Maypop.Syntax where
@@ -14,15 +13,97 @@ Here, I'll define what a Maypop "term" is.
 > import Control.Monad.State
 > import Data.Bool
 > import qualified Data.Set as Set
+>
 
-We'll be using DeBrujin indices, so there will be no strings (and thus,
+Before we get started on the terms of the Calculus of Inductive Constructions,
+we need to talk about the "Inductive" part. We have inductive data types, more
+specifically inductive GADTs in our language. Each inductive data type accepts
+some parameters, an "arity" declaration, and constructors. In general, the
+paper I'm using as reference defines the following form:
+
+```
+Inductive I (p1 : A1) ... (pn : An) : B1 -> ... -> Bm -> s where
+    C : forall (x1 : C1) ... (xp : Cp) -> I p1 ... pn u1 ... um
+    ...
+```
+
+There are a lot of parts to this definition, so let's take a look
+at all of them in turn. First, we have _parameters_, `p1` through `pn`.
+These are shared between all constructors of this data type. For instance,
+in a polymorphic list, the type of the elements in the list may be a
+parameter, and we'd write:
+
+```
+Inductive List (t : Type 0) : Type 0 where
+    ...
+```
+
+We could then use `t` to refer to the type of elements in both the
+`Cons` and `Nil` constructors.
+
+Next up is the arity. Our inductive definition, in general, defines
+a type family indexed by terms in our language. This declaration
+lists the types of these indexing terms, `B1` through `Bm`. Each
+constructor must specify the indexing terms of corresponding types.
+
+Finally, we have constructors. Constructors can take more arguments
+than have already been given via the parameters: the `Cons` constructor
+of the above `List`, for instance, would accept two additional parameters, one
+of type `t` and one of type `List t`. The `Nil` constructor, on the other hand,
+would accept no additional parameters. Finally, each constructor must
+return the type family defined by the data type, applied to the aforementioned
+indexing terms.
+
+We encode this in the following two inductive definitions. In our view,
+a constructor must have its own parameters (`cParams`), the index terms
+that it applies to the data type (`cIndices`), and it would be good
+(for debugging at the very least) for it to have a name (`cName`).
+An entire data type declaration must have its shared parameters
+(`iParams`), it's arity (`iArity`, which we represent as just the
+list of argument terms `B1` through `Bm`), the sort that it returns (`iSort`),
+a list of its constructors (`iConstructors`) and, once again, a name (`iName`).
+
+> data Constructor = Constructor
+>     { cParams :: [Term]
+>     , cIndices :: [Term]
+>     , cName :: String
+>     }
+>
+> data Inductive = Inductive
+>     { iParams :: [Term]
+>     , iArity :: [Term]
+>     , iSort :: Universe
+>     , iConstructors :: [Constructor]
+>     , iName :: String
+>     }
+
+Equality on data types is required, but hard to provide. For now, We'll
+just compare their names.
+
+> instance Eq Inductive where
+>     i1 == i2 = iName i1 == iName i2
+
+Finally, it's time to describe the terms in our language.
+We'll be using DeBrujin indices, so there will be
+{{< sidenote "right" "no-strings-note" "no strings" >}}
+Except for the names of inductive datatypes and their constructors,
+but I hope to be able to eliminate this information in the final
+version of the project.
+{{< /sidenote >}}(and thus,
 no need to perform any complicated alpha renaming). We have the following
 terms in the language:
 
 * **A reference to a variable**. The integer argument in the argument is a DeBrujin index.
 * **A lambda abstraction**. There's no need to provide a variable name for this abstraction (once again, because of DeBrujin indexing), but we _do_ need to provide a type for the argument. Thus, the first term is the type, and the second term is the body of the lambda.
 * **An application**. There's not much more to say here.
-* **A dependent product**, which is a generalization of a function type. Once again, there's no need to define a variable, but there _is_ a need to provide the input an output type.
+* **A dependent product**, which is a generalization of a function type. Once again, there's no need to define a variable, but there _is_ a need to provide the input an output type. Unlike a regular function, a dependent
+product's output type can depend on the value, and not just the type, of the input.
+* **A reference to a sort**, like \\(\\text{Prop}\\) or \\(\\text{Type}_0\\).
+* **An inductive type constructor**, referring to an inductively-defined type discussed above. We refer to it
+by a direct reference to the `Inductive` object to avoid having to resolve names.
+* **A constructor of an inductively defined type**. Once again, to avoid having to resolve names,
+we refer to a constructor by the inductive type it constructs, and the index into the list
+of that type's constructors.
 
 > data Term
 >     = Ref Int
@@ -30,15 +111,17 @@ terms in the language:
 >     | App Term Term
 >     | Prod Term Term
 >     | Universe Universe
+>     | Constr Inductive Int
+>     | Ind Inductive
 >     deriving Eq
 
 For convenience, we combine the references to the various
-universes (__Prop__ and __Type(n)__) into a data type,
+universes (\\(\\text{Prop}\\) and \\(\\text{Type}_n\\)) into a data type,
 `Universe`:
 
 > data Universe = Prop | Type Int deriving (Eq, Show)
 
-Having the data type by itself is quite boring.
+Having the term data type by itself is quite boring.
 There are a few helpful functions we can implement on terms.
 One of these function is the classic substitution, which
 is crucial in beta reduction. If we were to use strings for our
@@ -171,7 +254,7 @@ And now, the pretty printer itself.
 >                 st2 <- local (newName:) $ showM t2
 >                 return $ "λ(" ++ newName ++ ":" ++ st1 ++ ")." ++ st2
 >             showM (App t1 t2) =
->                 liftA2 (\s1 s2 -> s1 ++ "(" ++ s2 ++ ")") (showM t1) (showM t2)
+>                 liftA2 (\s1 s2 -> s1 ++ " (" ++ s2 ++ ")") (showM t1) (showM t2)
 >             showM (Prod t1 t2) = do
 >                 newName <- popName
 >                 st1 <- showM t1
@@ -180,6 +263,8 @@ And now, the pretty printer itself.
 >                  then return $ "∀(" ++ newName ++ ":" ++ st1 ++ ")." ++ st2
 >                  else return $ "(" ++ st1 ++ ") → " ++ st2
 >             showM (Universe u) = return $ show u
+>             showM (Constr i ci) = return $ maybe "??" cName $ nth ci (iConstructors i)
+>             showM (Ind i) = return $ iName i
 
 In the above, we used a function `nth`. This is just a safe version of the `(!!)` operator
 that is built into Haskell. It'll come in handy in other modules, too.

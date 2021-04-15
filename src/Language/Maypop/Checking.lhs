@@ -10,7 +10,7 @@ Let's work on type inference a little.
 
 First, a little utility function to compute the type of a type. This
 is straight out of the paper on the Calculus of Inductive Constructions.
-Prop has the type __Type(0)__, and each type __Type(n)__ has type __Type(n+1)__.
+Prop has the type \\(\\text{Type}_0\\), and each type \\(\\text{Type}\_n\\) has type \\(\\text{Type}\_{n+1}\\).
 
 > nextUniverse :: Universe -> Universe
 > nextUniverse Prop = Type 0
@@ -19,7 +19,13 @@ Prop has the type __Type(0)__, and each type __Type(n)__ has type __Type(n+1)__.
 Type inference can fail, so let's define a type for any kind of error that can
 come up.
 
-> data TypeError = FreeVariable Int | NotUniverse | NotProduct | TypeError deriving Show
+> data TypeError
+>     = FreeVariable Int
+>     | NotUniverse
+>     | NotProduct
+>     | TypeError
+>     | UnknownConstructor
+>     deriving Show
 
 Finally, on to the type inference function. We use the `MonadReader`
 typeclass to require read-only access to the local environment \\(\\Gamma\\).
@@ -38,6 +44,13 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >         Prop -> Prop
 >         t -> joinU ua t
 > infer (Universe u) = return $ Universe $ nextUniverse u
+> infer (Constr i ci) = withConstr $
+>     \c -> return $ foldr Prod (cReturn c) (iParams i ++ cParams c)
+>     where
+>         mConstr = nth ci $ iConstructors i
+>         withConstr f = maybe (throwError UnknownConstructor) f mConstr
+>         cReturn c = foldl App (Ind i) $ (iParams i ++ cIndices c)
+> infer (Ind i) = return $ foldr Prod (Universe $ iSort i) $ (iParams i ++ iArity i)
 >
 > runInfer :: Term -> Either TypeError Term
 > runInfer t = runReader (runExceptT $ infer t) []
@@ -48,7 +61,7 @@ not all terms consitute valid types. For instance, a lambda function is _not_ a
 type, but it is a term. Indeed, computation aside, only the `Universe` constructor corresponds
 to a valid type. However, some constructs in the Calculus of Constructions specifically require types,
 such as \\(\\Pi\\). Thus, we'll define a way to "cast" a term into a valid univere. This will
-be used to discard terms such as \\(\\Pi(\\lambda \\textbf{Prop}.0),\\textbf{Prop}\\), which have non-types in a
+be used to discard terms such as \\(\\Pi(\\lambda \\text{Prop}.0),\\text{Prop}\\), which have non-types in a
 place where a type is needed.
 
 > intoUniverse :: MonadError TypeError m => Term -> m Universe
@@ -89,7 +102,7 @@ abstraction, leading us to use `offsetFree`. Thus, extending the environment loo
 > extend' t f = inferU t >>= \u -> local (map (offsetFree 1) . (t:)) (f u)
 
 The Calculus of Constructions has cumulativity, and one of the rules for product
-types requires both input types \\(A\\) and \\(B\\) to be of the same sort __Type(i)__. This
+types requires both input types \\(A\\) and \\(B\\) to be of the same sort \\(\\text{Type}_i\\). This
 need not be the case out of the box; however, types in CoC are
 {{< sidenote "right" "semilattice-note" "a join semilattice," >}}
 In our implementation they're actually a total order. However, in languages like Coq,
