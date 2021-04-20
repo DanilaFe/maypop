@@ -1,13 +1,13 @@
 # Maypop Project Proposal
-Our project is to implement a dependnetly typed programming languguage called Maypop, based on the Calculus of
+Our project is to implement a dependently typed programming language called Maypop, based on the Calculus of
 Inductive Constructions (the formal model used by Coq). The users of this language would be experienced functional
-programmers,who are comfortable with statically typed languages, especially in the Hindley-Milner style. This
-language would provide them the ability to express much more complicated properties throguh the type systems, and
+programmers, who are comfortable with statically typed languages, especially in the Hindley-Milner style. This
+language would provide them the ability to express much more complicated properties through the type systems, and
 construct proofs of various claims about their programs. The initial goal is for Maypop to be an interpreted
-language; we are not, at the given time, interested in transalting it into machine code or LLVM IR. Instead,
+language; we are not, at the given time, interested in translating it into machine code or LLVM IR. Instead,
 we'd rather focus on extending the model of the programing language with other, potentially interesting constructs.
 Specifically, we'd like to play around with adding linearity / quantification to the type system, so that resource
-usage constraints can be more preceisly expressed. Alternatively, since the CIC is explicitly typed, we may
+usage constraints can be more precisely expressed. Alternatively, since the CIC is explicitly typed, we may
 consider extending the language to support (limited) type inference, or a tactic language to simplify writing
 proofs. The ultimate stretch goal is to re-implement the language in itself, and possibly prove some properties
 about that implementation within the language.
@@ -24,7 +24,7 @@ On the other hand, terms can be used within types (to express, for instance, a "
 symmetry is rather beautiful, and will be the foundation of our project, via a data type like `Expr`.
 
 The Calculus of _Inductive_ Constructions is extended with _inductive_ data types. These are also terms, but
-they are probably interesting enoguh to be described separately. An inductive data type can be _parameterized_
+they are probably interesting enough to be described separately. An inductive data type can be _parameterized_
 and _indexed_ by different terms, forming a type constructor [^1]. For instance, `Maybe` is parameterized
 by the type of the item inside of it (for instance, `User` or `String`), while `Vector` is parameterized
 by the type of its elements, and indexed by its length. An inductive data type consists of the following
@@ -40,16 +40,16 @@ can also be considered to be objects in our language.
 # Operations
 
 Two closely tied operations in our project will be type checking and type inference.
-Typechecking discards invalid terms in the Calculus of Indictive Constructions, but it does not, necessarily, compute types.
+Type checking discards invalid terms in the Calculus of Inductive Constructions, but it does not, necessarily, compute types.
 Indeed, the type system in CIC is undecideable, and determining a term's type in all cases (without hints
 or annotations) is not possible. The core language in CIC requires explicit type annotations, which makes
 type checking fairly straightforward, but also complicates writing code in the language. Type _inference_
 would make it easier for users to write code by allowing the interpreter to "guess" the types of various terms.
-compiler to guess the type of a particular term. In our language, more sohpisticated forms of type inference
+compiler to guess the type of a particular term. In our language, more sophisticated forms of type inference
 can eliminate the need for redundant patterns (a vector of length 1 can't be `Nil`), thus further
 reducing additional burden on the user.
 
-Evaluation would also be a core operation in our languge. This is especially so in the Calculus of Inductive Constructions
+Evaluation would also be a core operation in our language. This is especially so in the Calculus of Inductive Constructions
 because _types can depend on terms_. These terms, need not be in normal form; it is entirely possible to have
 something along the lines of `Vector Int (length xs)`. To correctly compute the type, it's necessary to be able
 to evaluate the expression `length xs`. Of course, even outside of type checking, for our language to be useful,
