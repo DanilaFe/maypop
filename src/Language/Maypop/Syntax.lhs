@@ -4,6 +4,7 @@ Here, I'll define what a Maypop "term" is.
 {{< todo >}}Let's be more clear about universe / type / etc{{< /todo >}}
 {{< todo >}}Extract the common typeclasses into a single class?{{< /todo >}}
 {{< todo >}}Inductive stuff has names? How does equality work?{{< /todo >}}
+{{< todo >}}Introduce binders.{{< /todo >}}
 
 > {-# LANGUAGE FlexibleContexts #-}
 > module Language.Maypop.Syntax where
@@ -11,7 +12,9 @@ Here, I'll define what a Maypop "term" is.
 > import Control.Monad.Reader
 > import Control.Monad.Except
 > import Control.Monad.State
+> import Control.Monad.Writer
 > import Data.Bool
+> import Data.List
 > import qualified Data.Set as Set
 >
 
@@ -104,6 +107,17 @@ by a direct reference to the `Inductive` object to avoid having to resolve names
 * **A constructor of an inductively defined type**. Once again, to avoid having to resolve names,
 we refer to a constructor by the inductive type it constructs, and the index into the list
 of that type's constructors.
+* **A case expression**. This works much like the case expression in Haskell, except
+that the expected type of the term being case analyzed (and the result type of the expression)
+must be explicitly specified. The `Inductive` argument
+{{< sidenote "right" "inductive-arg-note" "defines the expected term type," >}}
+The various indexing terms for the inductive type constructor are assigned
+names (no additional code is required here since we are just using DeBrujin indexing).
+These names are available only to the subsequent type expression.
+{{< /sidenote >}}
+the `Term` argument is the expression for the type, and `[Term]` is a list
+of branches for each constructor (the first term in the list is the expression
+for the second constructor).
 
 > data Term
 >     = Ref Int
@@ -113,6 +127,7 @@ of that type's constructors.
 >     | Universe Universe
 >     | Constr Inductive Int
 >     | Ind Inductive
+>     | Case Term Inductive Term [Term]
 >     deriving Eq
 
 For convenience, we combine the references to the various
@@ -135,55 +150,76 @@ Concretely, if we were replacing a variable `n` with a term outside an
 abstraction, inside the abstraction `n+1` refers to that same variable.
 We keep track of it accordingly.
 
-> substitute :: Int -> Term -> Term -> Term
-> substitute n t = sub 0
+Before we get to that, a quick aside. There will be several operations
+in our language in which we'll need to keep track of the number
+of surrounding binders. When case expressions come into play,
+there are even more cases (no pun intended) in which we need
+to increment our "counter" of variables. Rather than repeatedly
+implementing this functionality -- perhaps with slight changes --
+it's better to write a generic operation that will help
+us reuse some code. To achieve this, let's assume that the
+number of surrounding binders -- either from lambda abstractions
+or from pattern matching -- is kept inside of a `Reader` monad,
+which we will represent with `MonadReader Int`. Then, we can
+define a generic operation that transforms __only free variable terms__,
+with other possible monadic effects captured by the arbitrary monad `m`:
+
+> transform :: MonadReader Int m => (Int -> m Term) -> Term -> m Term
+> transform f = trans
 >     where
->         sub x (Ref m) | (n+x) == m = offsetFree x t
->         sub x (Abs t1 t2) = Abs (sub x t1) (sub (x+1) t2)
->         sub x (App t1 t2) = App (sub x t1) (sub x t2)
->         sub x (Prod t1 t2) = Prod (sub x t1) (sub (x+1) t2)
->         sub x t = t
+>         trans (Ref m) = ask >>= \x -> if m >= x then f m else return (Ref m)
+>         trans (Abs t1 t2) = liftA2 Abs (trans t1) (deepen 1 $ trans t2)
+>         trans (App t1 t2) = liftA2 App (trans t1) (trans t2)
+>         trans (Prod t1 t2) = liftA2 Prod (trans t1) (deepen 1 $ trans t2)
+>         trans (Case t i tt ts) = do
+>             t' <- trans t
+>             tt' <- deepen (length $ iArity i) $ trans tt
+>             ts' <- zipWithM (deepen . length . cParams) (iConstructors i) (map trans ts)
+>             return $ Case t' i tt' ts'
+>         trans t = return t
+>         deepen i = local (+i)
+
+Substitution is a special case of this kind of transformation.
+When encountering a free variable, it replaces it with the given term `t`.
+
+> substitute :: Int -> Term -> Term -> Term
+> substitute n t r = runReader (transform op r) 0
+>     where op _ = ask >>= \x -> return $ offsetFree x t
 
 It is perhaps surprising to see the use of `offsetFree` here. Why do we need to do anything
 special while substituting? We don't if `t` is a closed term (that is, if it doesn't have free
 variables). However, if it _does_ have free variables, we need to be careful to make sure that
 these variables are pointing to the same spot. The (0-indexed) term \\(\\lambda.1\\) refers
 to some free variable "outside", but if we substitute it into the body of another abstraction,
-getting \\(\\lambda.\\lambda.1\\), it now refers to the first argument of the function.
+getting \\(\\lambda.\\lambda.1\\), it now refers to the first argument of the resulting binary function.
 This isn't what we want - a free variable reference in this term can't possibly refer to a
-variable that only exists inside _another_ lambda abstraction. It's easy to see that,
+variable that only exists inside _another_ lambda abstraction. It's easy to see that
 to preserve free variables, we need to increment the free variables in the term being
-substituted by the number of surrounding lambda abstractions in the destination. To
+substituted by the number of surrounding binders in the destination. To
 do so, we can define a function that increments (or decrements)
-the free varibles in a given expression. We once again use a Reader monad
-to keep track of the current number of surrounding lambda abstractions.
+the free varibles in a given expression. That's exactly what `offsetFree`
+does. This function is also a special case of the above `transform` operation,
+since it adds a constant number `o` to each free variable term it encounters.
 
 > offsetFree :: Int -> Term -> Term
-> offsetFree o t = runReader (off t) 0
->     where
->         off (Ref i) = bool (Ref i) (Ref (i+o)) <$> asks (i>=)
->         off (Abs t1 t2) = liftA2 Abs (off t1) (deepen $ off t2)
->         off (App t1 t2) = liftA2 App (off t1) (off t2)
->         off (Prod t1 t2) = liftA2 Prod (off t1) (deepen $ off t2)
->         off t = return t
->         deepen m = local (+1) m
+> offsetFree o t = runReader (transform op t) 0
+>     where op i = return $ Ref $ i + o
 
 Another couple of helpful functions is `freeVars` and `occurs`. We'll use the latter
 in our pretty printer: after all, the function arrow \\(A\\rightarrow B\\) is
 a special case of the product type \\(\\Pi (a:A), B\\) where \\(a \\not\\in \\text{free}(B)\\).
-Finding free variables is easy enough: at any subexpression, any DeBrujin index that's
-greater than the number of surrounding abstractions or products is a free variable.
-We use a Reader monad to keep track of the current number of surrounding abstractions.
+Given our transformation function, finding free variables is very easy. We can
+take advantage of the polymorphic type of our monad, `m`, and require that it also
+be a `Writer` monad, which carries around a piece of data we can write to, but never read.
+In our case, this piece of data will be a set of free variables. Each time our transformation
+operation will encounter a free variable, it will emit it (using `tell`), but leave
+it intact (via `const (Ref i)`). When emitting, we need to be careful to subtract
+the number of surrounding binders: \\(\\lambda.1\\) and \\(\\lambda.\\lambda.2\\)
+both refer to the same free variable.
 
 > freeVars :: Term -> [Int]
-> freeVars t = Set.toList $ runReader (freeVars' t) 0
->     where
->         freeVars' (Ref i) = bool Set.empty (Set.singleton i) <$> asks (i>=) 
->         freeVars' (Abs t1 t2) = liftA2 (<>) (freeVars' t1) (deepen $ freeVars' t2)
->         freeVars' (App t1 t2) = liftA2 (<>) (freeVars' t1) (freeVars' t2)
->         freeVars' (Prod t1 t2) = liftA2 (<>) (freeVars' t1) (deepen $ freeVars' t2)
->         freeVars' _ = return Set.empty
->         deepen m = (Set.map $ subtract 1) <$> local (+1) m
+> freeVars t = Set.toList $ snd $ runWriter $ runReaderT (transform op t) 0
+>     where op i = const (Ref i) <$> (ask >>= tell . Set.singleton . (i-))
 
 Since `freeVars` finds _all_ free variables in a term, checking if a single variable
 occurs free becomes as simple as looking inside that list.
@@ -242,6 +278,16 @@ and then removes it from the list (by setting the name list to its tail via `tai
 > popName :: MonadState Names m => m String
 > popName = gets headN <* modify tailN
 
+In case we need multiple names, we can define `popNames` as follows:
+
+> popNames :: MonadState Names m => Int -> m [String]
+> popNames i = sequence $ replicate i popName
+
+{{< todo >}}Elaborate here.{{< /todo >}}
+
+> extendNames :: MonadReader [String] m => [String] -> m a -> m a
+> extendNames ns m = foldr (local . (:)) m ns
+
 And now, the pretty printer itself.
 
 > instance Show Term where
@@ -251,20 +297,31 @@ And now, the pretty printer itself.
 >             showM (Abs t1 t2) = do
 >                 newName <- popName
 >                 st1 <- showM t1
->                 st2 <- local (newName:) $ showM t2
+>                 st2 <- extendNames [newName] $ showM t2
 >                 return $ "λ(" ++ newName ++ ":" ++ st1 ++ ")." ++ st2
 >             showM (App t1 t2) =
 >                 liftA2 (\s1 s2 -> s1 ++ " (" ++ s2 ++ ")") (showM t1) (showM t2)
 >             showM (Prod t1 t2) = do
 >                 newName <- popName
 >                 st1 <- showM t1
->                 st2 <- local (newName:) $ showM t2
+>                 st2 <- extendNames [newName] $ showM t2
 >                 if occurs 0 t2
 >                  then return $ "∀(" ++ newName ++ ":" ++ st1 ++ ")." ++ st2
 >                  else return $ "(" ++ st1 ++ ") → " ++ st2
 >             showM (Universe u) = return $ show u
 >             showM (Constr i ci) = return $ maybe "??" cName $ nth ci (iConstructors i)
 >             showM (Ind i) = return $ iName i
+>             showM (Case t i tt ts) = do
+>                 st <- showM t
+>                 termName <- popName
+>                 indexNames <- popNames (length $ iArity i)
+>                 stt <- extendNames (termName:indexNames) (showM tt)
+>                 sts <- zipWithM constr (iConstructors i) ts
+>                 return $ "match " ++ st ++ " as " ++ termName ++ " in " ++ (intercalate " " $ iName i : indexNames) ++ " return " ++ stt ++ " with { " ++ intercalate "; " sts ++ " }"
+>             constr c t = do
+>                 paramNames <- popNames (length $ cParams c)
+>                 st <- extendNames paramNames (showM t)
+>                 return $ intercalate " " (cName c : paramNames) ++ " -> " ++ st
 
 In the above, we used a function `nth`. This is just a safe version of the `(!!)` operator
 that is built into Haskell. It'll come in handy in other modules, too.
