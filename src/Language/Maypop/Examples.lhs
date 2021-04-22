@@ -76,9 +76,44 @@ And here's one for bounded natural numbers.
 >         , Constructor { cParams = [ Ind nat, App (Ind fin) (Ref 0) ], cIndices = [ App (Constr nat 1) (Ref 1) ], cName = "FS" }
 >         ]
 >     }
->
-> fz :: Int -> Term
-> fz m = App (Constr fin 0) (n m)
+
+Once again, we could use some shortcuts. We'll use `fz n` to create a bounded zero
+that's less than `n`, and `fs n` to create the successor function expecting an
+argument less than `n`.
+
+> fz :: Term -> Term
+> fz = App (Constr fin 0)
 > 
-> fs :: Int -> Term -> Term
-> fs m = App (App (Constr fin 1) (n m))
+> fs :: Term -> Term -> Term
+> fs m = App (App (Constr fin 1) m)
+
+Let's also define an either data type.
+
+> either_ :: Inductive
+> either_ = Inductive
+>     { iParams = [t 0, t 0]
+>     , iArity = []
+>     , iSort = Type 0
+>     , iName = "Either"
+>     , iConstructors =
+>         [ Constructor { cParams = [Ref 1], cIndices = [], cName = "Left" }
+>         , Constructor { cParams = [Ref 0], cIndices = [], cName = "Right" }
+>         ]
+>     }
+>
+> inl :: Term -> Term
+> inl = App (Constr either_ 0)
+>
+> inr :: Term -> Term
+> inr = App (Constr either_ 1)
+
+Let's do a little bit of pattern matcing, shall we?
+
+> ex1 :: Term
+> ex1 = Case (n 3) nat (Ind nat) [n 0, Ref 0]
+>
+> ex2 :: Term
+> ex2 = Abs (Ind nat) $ Abs (App (Ind fin) $ s (Ref 0)) $ Case (Ref 0) fin (App (Ind fin) (Ref 3)) [fz (Ref 2), Ref 0]
+>
+> ex3 :: Term
+> ex3 = Case (inr $ n 0) either_ (Ind nat) []
