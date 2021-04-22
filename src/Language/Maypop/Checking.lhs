@@ -9,6 +9,9 @@ Let's work on type inference a little.
 > import Control.Monad.Reader
 > import Control.Monad.Except
 > import Control.Monad.State
+> import Data.Bifunctor
+> import Data.Bool
+> import Debug.Trace
 
 First, a little utility function to compute the type of a type. This
 is straight out of the paper on the Calculus of Inductive Constructions.
@@ -25,9 +28,18 @@ come up.
 >     = FreeVariable Int
 >     | NotUniverse
 >     | NotProduct
+>     | NotInductive
 >     | TypeError
 >     | UnknownConstructor
 >     deriving Show
+
+It is also helpful to write a function that ensures a boolean condition
+is met, failing if it isn't. Aside from the condition, we need to
+provide information about what actually went wrong, in the form
+of a `TypeError`:
+
+> guardE :: MonadError TypeError m => TypeError -> Bool -> m ()
+> guardE e = bool (throwError e) (return ())
 
 Finally, on to the type inference function. We use the `MonadReader`
 typeclass to require read-only access to the local environment \\(\\Gamma\\).
@@ -51,8 +63,26 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >     where
 >         mConstr = nth ci $ iConstructors i
 >         withConstr f = maybe (throwError UnknownConstructor) f mConstr
->         cReturn c = foldl App (Ind i) $ (iParams i ++ cIndices c)
+>         cParamRefs c = map (+length (cParams c)) [0..length (iParams i) -1]
+>         cIndParams c = map Ref $ reverse $ cParamRefs c
+>         cReturn c = foldl App (Ind i) $ cIndParams c ++ cIndices c
 > infer (Ind i) = return $ foldr Prod (Universe $ iSort i) $ (iParams i ++ iArity i)
+> infer (Case t i tt ts) = do
+>     (i', is) <- inferI t
+>     guardE TypeError $ i == i'
+>     let (ps, inds) = splitAt (length $ iParams i) is
+>     let tType = foldl App (Ind i) is
+>     let constr (ci,c) b = do
+>         let subPs off = substituteMany off (map (offsetFree off) ps)
+>         let cps = zipWith subPs [0..] $ cParams c
+>         let inds' = map (subPs $ length cps) $ cIndices c
+>         let expt = foldl App (Constr i ci) $ map Ref $ reverse $ [0..length cps-1]
+>         let et = substituteMany 0 (expt:inds') tt
+>         at <- offsetFree (negate $ length cps) <$> (extendAll cps $ infer b)
+>         guardE TypeError $ at == et
+>     extendAll (tType: iArity i) $ inferU tt
+>     zipWithM constr (zip [0..] $ iConstructors i) ts
+>     return $ substituteMany 0 (t:inds) tt
 >
 > runInfer :: Term -> Either TypeError Term
 > runInfer t = runReader (runExceptT $ infer t) []
@@ -89,6 +119,26 @@ Once again, we define a specailized version of `infer` for products:
 > inferP :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m (Term, Term)
 > inferP t = infer t >>= intoProduct
 
+Just as we may want to cast a data type into a product, we may also want to cast
+it into an inductive data type, extracting the parameters and indices. Things
+are a little trickier here, since fully applied inductive type constructors
+are represented as a chain of `App` nodes. We thus define a function to turn this
+tree into a list:
+
+> collectApps :: MonadError TypeError m => Term -> m (Inductive, [Term])
+> collectApps t = second reverse <$> collect t
+>     where
+>         collect (App l r) = second (r:) <$> collect l
+>         collect (Ind i) = return (i, [])
+>         collect _ = throwError NotInductive
+
+Unlike the previous two "casts", we need to perform type inference to ensure
+that a type constructor is fully applied and well formed. Thus, we forego the `intoInductive`
+function, and jump straight into `inferI`.
+
+> inferI :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m (Inductive, [Term])
+> inferI t = infer t >>= \tt -> inferU tt >> collectApps tt
+
 Next, we have to be careful about the rules of the Calculus of Constructions. We
 can't _just_ put a type straight from a lambda into the environment; it so happens
 that our types can be ill-formed! Thus, we need to first verify
@@ -97,11 +147,14 @@ Furthermore, because types in the environment can refer to terms via DeBrujin
 indices, we must be careful to preserve these references inside the body of a lambda
 abstraction, leading us to use `offsetFree`. Thus, extending the environment looks like this:
 
-> extend :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m Term -> m Term
+> extend :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m a -> m a
 > extend t m = extend' t $ const m
 >
-> extend' :: (MonadReader [Term] m, MonadError TypeError m) => Term -> (Universe -> m Term) -> m Term
+> extend' :: (MonadReader [Term] m, MonadError TypeError m) => Term -> (Universe -> m a) -> m a
 > extend' t f = inferU t >>= \u -> local (map (offsetFree 1) . (t:)) (f u)
+>
+> extendAll :: (MonadReader [Term] m, MonadError TypeError m) => [Term] -> m a -> m a
+> extendAll = flip (foldr extend)
 
 The Calculus of Constructions has cumulativity, and one of the rules for product
 types requires both input types \\(A\\) and \\(B\\) to be of the same sort \\(\\text{Type}_i\\). This

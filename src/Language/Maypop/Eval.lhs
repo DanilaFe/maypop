@@ -13,8 +13,8 @@ a function before they are evaluated.
 
 > eval :: Term -> Term
 > eval (Abs l r) = Abs (eval l) (eval r)
-> eval (App l r)
->     | (Abs _ b) <- offsetFree (-1) (eval l) = eval $ substitute 0 r b
->     | t <- eval l = App t (eval r)
+> eval (App l r) = case eval l of
+>     (Abs _ b) -> eval $ substitute 0 r b
+>     t -> App t (eval r)
 > eval (Prod l r) = Prod (eval l) (eval r)
 > eval t = t

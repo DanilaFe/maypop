@@ -86,6 +86,11 @@ just compare their names.
 > instance Eq Inductive where
 >     i1 == i2 = iName i1 == iName i2
 
+{{< todo >}}Debug! Delete below instance. {{< /todo >}}
+
+> instance Show Inductive where
+>     show = iName
+
 Finally, it's time to describe the terms in our language.
 We'll be using DeBrujin indices, so there will be
 {{< sidenote "right" "no-strings-note" "no strings" >}}
@@ -179,12 +184,46 @@ with other possible monadic effects captured by the arbitrary monad `m`:
 >         trans t = return t
 >         deepen i = local (+i)
 
-Substitution is a special case of this kind of transformation.
-When encountering a free variable, it replaces it with the given term `t`.
+Substitution is a special case of this kind of transformation. When encountering the
+target free variable, it replaces it with the given term `t`. There's a little
+nuance to this: we want to decrement free variables in the _target_ term
+(because we're effectively removing a lambda abstraction), but we don't want to
+decrement them in the term being substituted, since it hasn't changed. However,
+after substittion occurs, there's no way to tell which part of the resulting
+expression was there originally and which was placed there. Thus, we have
+to perform substitution and decrements in one go.
+
+There's another concern, too. If we substitute for the free variable other
+than the "shortest" one (that is, the one with the smallest DeBrujin index),
+we run the risk of turning free variables into bound variables when decrementing.
+Consider something like \\((\\lambda.1 \\ 2)[1 := \\lambda.0]\\), where we
+replace the second "shortest" variable with the identity function. If we decrement
+the free variables, we end up with \\(\\lambda.0 \\ \\lambda.0\\). There are no
+free variables in this term! We only need to decrement free variables
+larger than the one we're substituting. We can encapsulate this functionality
+in a helper function `safeDec`:
+
+> safeDec :: Int -> Int -> Int -> Int -> Int
+> safeDec n x b i | i > n + x = i - b
+> safeDec _ _ _ i = i
+
+Finally, we can define substitution:
 
 > substitute :: Int -> Term -> Term -> Term
 > substitute n t r = runReader (transform op r) 0
->     where op _ = ask >>= \x -> return $ offsetFree x t
+>     where op i = (\x -> if i == n + x then offsetFree x t else Ref $ safeDec n x 1 i) <$> ask
+
+What if we want to substitute multiple terms terms at the same time?
+Simply composing calls to `substitute` is not good enough, because a free variable introduced
+by one term may be another target for substitution. To accomodate multiple substitutions,
+we can write another helper function, `substituteMany`:
+
+> substituteMany :: Int -> [Term] -> Term -> Term
+> substituteMany n ts r = runReader (transform op r) 0
+>     where
+>         sub = zip [n..] (reverse ts)
+>         off = length ts
+>         op i = (\x -> maybe (Ref $ safeDec n x off i) (offsetFree x) $ lookup (i-x) sub) <$> ask
 
 It is perhaps surprising to see the use of `offsetFree` here. Why do we need to do anything
 special while substituting? We don't if `t` is a closed term (that is, if it doesn't have free
@@ -293,7 +332,7 @@ And now, the pretty printer itself.
 > instance Show Term where
 >     show t = fst $ runState (runReaderT (showM t) []) names
 >         where
->             showM (Ref i) = nth i <$> ask >>= maybe (return "??") return
+>             showM (Ref i) = nth i <$> ask >>= maybe (return $ "??" ++ show i) return
 >             showM (Abs t1 t2) = do
 >                 newName <- popName
 >                 st1 <- showM t1
