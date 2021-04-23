@@ -20,8 +20,13 @@ jobs:
               with:
                   hugo-version: '0.80.0'
 
+            - name: Setup Pandoc
+              uses: r-lib/actions/setup-pandoc@v1
+              with:
+                  pandoc-version: '2.9.2.1'
+
             - name: Copy Files
-              run: cd maypop && mkdir -p ../maypop-hugo/content/modules && ./script/pages.sh ../maypop-hugo
+              run: ls -la maypop-hugo && cd maypop && mkdir -p ../maypop-hugo/content/modules && ./script/pages.sh ../maypop-hugo
 
             - name: Build
               run: cd maypop-hugo && hugo
