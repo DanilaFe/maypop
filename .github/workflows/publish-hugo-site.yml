@@ -1,0 +1,36 @@
+name: Publish Hugo Site
+on: push
+jobs:
+    deploy:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Clone Maypop source
+              uses: actions/checkout@v2
+              with:
+                  path: maypop
+
+            - name: Clone Hugo files
+              uses: actions/checkout@v2
+              with:
+                  submodules: recursive
+                  path: maypop-hugo
+
+            - name: Setup Hugo
+              uses: peaceiris/actions-hugo@v2
+              with:
+                  hugo-version: '0.80.0'
+
+            - name: Copy Files
+              run: cd maypop && ./script/pages.sh ../maypop-hugo
+
+            - name: Build
+              run: cd maypop-hugo && hugo
+
+            - name: Upload 
+              uses: wlixcc/SFTP-Deploy-Action@v1.0
+              with:
+                  username: 'fedorind'
+                  server: flip.engr.oregonstate.edu
+                  ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+                  local_path: './maypop-hugo/public'
+                  remote_path: '/nfs/stak/users/fedorind/public_html/CS583'
