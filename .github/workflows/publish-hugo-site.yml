@@ -6,15 +6,6 @@ jobs:
         steps:
             - name: Clone Maypop source
               uses: actions/checkout@v2
-              with:
-                  path: maypop
-
-            - name: Clone Hugo files
-              uses: actions/checkout@v2
-              with:
-                  repository: https://dev.danilafe.com/Maypop/maypop-hugo.git
-                  submodules: recursive
-                  path: maypop-hugo
 
             - name: Setup Hugo
               uses: peaceiris/actions-hugo@v2
@@ -27,10 +18,10 @@ jobs:
                   pandoc-version: '2.9.2.1'
 
             - name: Copy Files
-              run: ls -la maypop-hugo && cd maypop && mkdir -p ../maypop-hugo/content/modules && ./script/pages.sh ../maypop-hugo
+              run: ./script/pages.sh
 
             - name: Build
-              run: cd maypop-hugo && hugo
+              run: hugo
 
             - name: Upload 
               uses: wlixcc/SFTP-Deploy-Action@v1.0
@@ -38,5 +29,5 @@ jobs:
                   username: 'fedorind'
                   server: flip.engr.oregonstate.edu
                   ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
-                  local_path: './maypop-hugo/public'
+                  local_path: './public'
                   remote_path: '/nfs/stak/users/fedorind/public_html/CS583'
