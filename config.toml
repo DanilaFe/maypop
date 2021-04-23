@@ -1,0 +1,8 @@
+baseURL = "http://web.engr.oregonstate.edu/~fedorind/CS583/"
+languageCode = "en-us"
+title = "Maypop"
+theme = "vanilla"
+
+[markup]
+  [markup.highlight]
+    style = "solarized-light"
