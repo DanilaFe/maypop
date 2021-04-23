@@ -32,5 +32,5 @@ jobs:
                   username: 'fedorind'
                   server: flip.engr.oregonstate.edu
                   ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
-                  local_path: './public'
+                  local_path: './public/*'
                   remote_path: '/nfs/stak/users/fedorind/public_html/CS583'
