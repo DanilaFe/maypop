@@ -1,0 +1,3 @@
+[submodule "themes/vanilla"]
+	path = themes/vanilla
+	url = https://dev.danilafe.com/Maypop/maypop-vanilla-theme.git
