@@ -13,6 +13,7 @@ jobs:
               uses: peaceiris/actions-hugo@v2
               with:
                   hugo-version: '0.80.0'
+                  extended: true
 
             - name: Setup Pandoc
               uses: r-lib/actions/setup-pandoc@v1
