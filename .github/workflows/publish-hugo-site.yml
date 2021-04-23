@@ -12,6 +12,7 @@ jobs:
             - name: Clone Hugo files
               uses: actions/checkout@v2
               with:
+                  repository: https://dev.danilafe.com/Maypop/maypop-hugo.git
                   submodules: recursive
                   path: maypop-hugo
 
