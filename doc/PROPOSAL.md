@@ -29,6 +29,7 @@ and _indexed_ by different terms, forming a type constructor [^1]. For instance,
 by the type of the item inside of it (for instance, `User` or `String`), while `Vector` is parameterized
 by the type of its elements, and indexed by its length. An inductive data type consists of the following
 elements:
+
 * **The parameters**: things that are the same for each constructor, and don't affect the structure of the data 
 * **The "arity"**: the _types_ of the indices to the type constructor that differ depending on the structure of the data.
 * **The constructors**: ways of constructing the data type, which may accept arguments (like `x` and `xs` in `Cons`),
@@ -45,7 +46,7 @@ Indeed, the type system in CIC is undecideable, and determining a term's type in
 or annotations) is not possible. The core language in CIC requires explicit type annotations, which makes
 type checking fairly straightforward, but also complicates writing code in the language. Type _inference_
 would make it easier for users to write code by allowing the interpreter to "guess" the types of various terms.
-compiler to guess the type of a particular term. In our language, more sophisticated forms of type inference
+In our language, more sophisticated forms of type inference
 can eliminate the need for redundant patterns (a vector of length 1 can't be `Nil`), thus further
 reducing additional burden on the user.
 
