@@ -1,7 +1,5 @@
 Here, I'll define what a Maypop "term" is.
 
-{{< todo >}}Let's use LaTeX for types and kinds and so on.{{< /todo >}}
-{{< todo >}}Let's be more clear about universe / type / etc{{< /todo >}}
 {{< todo >}}Extract the common typeclasses into a single class?{{< /todo >}}
 {{< todo >}}Inductive stuff has names? How does equality work?{{< /todo >}}
 {{< todo >}}Introduce binders.{{< /todo >}}
