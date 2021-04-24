@@ -1,4 +1,4 @@
-baseURL = "http://web.engr.oregonstate.edu/~fedorind/CS583/"
+baseURL = "https://web.engr.oregonstate.edu/~fedorind/CS583/"
 languageCode = "en-us"
 title = "Maypop"
 theme = "vanilla"
