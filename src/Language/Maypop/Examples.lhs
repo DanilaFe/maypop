@@ -136,3 +136,9 @@ Let's do a little bit of pattern matcing, shall we?
 >
 > ex4 :: Term
 > ex4 = Abs (t 0) $ Abs (t 0) $ Abs (App (App (Ind pair_) (Ref 1)) (Ref 0)) $ Case (Ref 0) pair_ (App (App (Ind pair_) (Ref 2)) (Ref 3)) [ mkPair (Ref 3) (Ref 4) (Ref 0) (Ref 1) ]
+
+> ex5 :: Term
+> ex5 = App (App ex3 (Ind nat)) $ inl (Ind nat) (Ind nat) $ n 3
+>
+> ex6 :: Term
+> ex6 = App (App (App ex4 (Ind nat)) (Ind nat)) $ mkPair (Ind nat) (Ind nat) (n 3) (n 6)

@@ -2,6 +2,9 @@ In this module, we'll cover evaluating Maypop terms.
 
 > module Language.Maypop.Eval where
 > import Language.Maypop.Syntax
+> import Control.Monad
+> import Data.Bifunctor
+> import Data.Maybe
 
 We'll go with normal-order evaluation. Lazy evaluation would
 require some degree of sharing, which would be a little
@@ -17,4 +20,16 @@ a function before they are evaluated.
 >     (Abs _ b) -> eval $ substitute 0 r b
 >     t -> App t (eval r)
 > eval (Prod l r) = Prod (eval l) (eval r)
+> eval c@(Case t i _ ts) = fromMaybe c $ do
+>     ((i', ci), xs) <- collectConstrApps (eval t)
+>     guard $ i == i'
+>     b <- nth ci ts
+>     return $ eval $ substituteMany 0 xs b
 > eval t = t
+
+> collectConstrApps :: Term -> Maybe ((Inductive, Int), [Term])
+> collectConstrApps t = second reverse <$> collect t
+>     where
+>         collect (App l r) = second (r:) <$> collect l
+>         collect (Constr i ci) = Just ((i, ci), [])
+>         collect _ = Nothing
