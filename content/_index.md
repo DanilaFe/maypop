@@ -1,6 +1,6 @@
 ---
 title: Maypop Home
-description: Daniel Fedorin's personal blog, covering topics such as functional programming, compiler development, and more!
+description: Maypop is a dependently typed programming language implemented using Literate Haskell.
 ---
 Hi, and weclome to Maypop! This site is a little bit of an experiment - we're implementing
 a dependently typed language entirely using Literate Haskell. The idea is to guide users
