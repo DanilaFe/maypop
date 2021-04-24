@@ -1,5 +1,5 @@
 ---
-title: Daniel's Blog
+title: Maypop Home
 description: Daniel Fedorin's personal blog, covering topics such as functional programming, compiler development, and more!
 ---
 Hi, and weclome to Maypop! This site is a little bit of an experiment - we're implementing
