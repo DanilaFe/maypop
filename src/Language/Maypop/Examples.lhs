@@ -13,13 +13,30 @@ to the term `Universe (Type n)`.
 
 In the absense of concrete types, the simplest term I can think of is the polymorphic
 identity function. This function takes its argument type as input first, then an argument
-of that type, and returns the argument unchanged.
+of that type, and returns the argument unchanged. Mathematically, and without
+using DeBrujin indices, this function could be written as:
+
+\$$
+\\text{id} = \\lambda (\\alpha : \\text{Type 0}).\\lambda (a : \\alpha). a
+\$$
+
+Then, it is applied as \\(\\text{id} \\ \\mathbb{N} \\ 3\\), which evaluates to \\(3\\).
 
 > id_ :: Term
 > id_ = Abs (t 0) $ Abs (Ref 0) $ Ref 0
 
 In a similar vein, we can define Haskell's `const` function. Much like the identity function,
-it does not require any other data types, and does not need to look into its arguments.
+it does not require any other data types, and does not need to look into its arguments. The
+Haskell signature of this function is `a -> b -> a`; there are _two_ types that are in
+play here, and the mathematical definition of the function is to match:
+
+\$$
+\\text{const} = \\lambda (\\alpha : \\text{Type 0}). \\lambda (\\beta : \\text{Type 0}). \\lambda (a : \\alpha). \\lambda (b : \\beta). a
+\$$
+
+Since `const` is in the Haskell Prelude, and since it's a useful function that we don't want
+to shadow, we once again add an underscore to the name of the Maypop term. The entire
+definition is as follows:
 
 > const_ :: Term
 > const_ = Abs (t 0) $ Abs (t 0) $ Abs (Ref 1) $ Abs (Ref 1) $ Ref 1
@@ -35,7 +52,24 @@ but our type parameter here _will be_ `Type 0`, a type parameter of type `Type 1
 > idProp :: Term
 > idProp = App (App id_' (t 0)) p
 
-Why don't we define some data types? Here's one for natural numbers.
+We'll be writing function applications a lot. This will get cumbersome, especially
+since we'll have to be explicitly passing type parameters to any polymorphic function.
+To save ourselves the burden of writing these applications using chains of `App`s,
+let's define some meta-notation: \\(\\underline{\\text{apps}}\\). We define
+it as follows:
+
+```
+apps t [t1, ..., tn] = App (App (App t t1) ...) tn
+```
+
+This is a straightforward left fold:
+
+> apps :: Term -> [Term] -> Term
+> apps = foldl App
+
+There's only so much you can do by using the pure Calculus of Constructions.
+What about the _Inductive_ part? Let's define some basic inductive data types?
+Here's one for natural numbers.
 
 > nat :: Inductive
 > nat = Inductive
@@ -48,6 +82,18 @@ Why don't we define some data types? Here's one for natural numbers.
 >         , Constructor { cParams = [ Ind nat ], cIndices = [], cName = "S" }
 >         ]
 >     }
+
+This is a lot of code, for what seems like a very basic data type! Well,
+natural numbers are not _parameterized_ by anything, and nor are they _indexed_
+by anything, so both `iParams` and `iArity` are empty. The type of natural numbers,
+which we'll denote \\(\\mathbb{N}\\), is itself of sort \\(\\text{Type 0}\\).
+Finally, this type has two constructors: `O`, which represents zero and takes
+no parameters, and `S`, which
+{{< sidenote "right" "debrujin-note" "takes another natural number as a parameter," >}}
+The parameter is unnamed here because we use DeBrujin indices; however,
+it occurs in the <code>cParams</code> field of the second constructor.
+{{< /sidenote >}}
+and returns its succesor.
 
 We can define a few quick shortcuts for writing down natural numbers. We'll
 use `n` to convert a Haskell `Int` into a natural number, `s` to refer to the
@@ -63,7 +109,25 @@ natural succsessor function, and `o` to refer to the natural zero.
 > o :: Term
 > o = Constr nat 0
 
-And here's one for bounded natural numbers.
+Natural numbers can be written down in pretty much any language. A more interesting
+data type is that of _finite_ natural numbers. They are indexed by a natural number,
+and `Fin` is thus a type constructor; the type `Fin n` represents "natural numbers
+less than `n`". This data type has two constructors, which correspond quite closely
+to those of the natural numbers: `FZ` and `FS`. Just like `O`, `FZ` represents
+zero; however, there are _many possible zeroes_! There's a zero less than 1, a zero
+less than 2, 
+{{< sidenote "right" "zero-note" "and so on." >}}
+It doesn't matter that these zeroes represent the same number; they are inhabitants
+of different types, and are therefore different to the type system.
+{{< /sidenote >}}
+The `FZ` constructor, then, needs to take the exact natural number as argument.
+Thus, we have \\(\\text{FZ} : \\forall (n : \\mathbb{N}). \\text{Fin} \\ n\\).
+A similar story applies to the `FS` constructor; however, unlike `FZ`, it takes
+another number, and represents that number's successor. We know from math that
+if \\(f < n\\), then \\(f + 1 < n + 1\\). By the same token, if \\(f : \\text{Fin} \\ n\\),
+then \\(\\text{FS} \\ f : \\text{Fin} \\ (S \\ n)\\). Overall, we have
+\\(\\text{FS} : \\forall (n : \\mathbb{N}). \\text{Fin} \\ n \\rightarrow \\text{Fin} \\ (S \\ n)\\).
+This is the code we end up with:
 
 > fin :: Inductive
 > fin = Inductive
@@ -136,7 +200,7 @@ Let's do a little bit of pattern matcing, shall we?
 >
 > ex4 :: Term
 > ex4 = Abs (t 0) $ Abs (t 0) $ Abs (App (App (Ind pair_) (Ref 1)) (Ref 0)) $ Case (Ref 0) pair_ (App (App (Ind pair_) (Ref 2)) (Ref 3)) [ mkPair (Ref 3) (Ref 4) (Ref 0) (Ref 1) ]
-
+>
 > ex5 :: Term
 > ex5 = App (App ex3 (Ind nat)) $ inl (Ind nat) (Ind nat) $ n 3
 >
