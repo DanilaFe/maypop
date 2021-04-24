@@ -6,10 +6,10 @@ that the code is still operating as expected.
 > import Language.Maypop.Syntax
 
 For convenience, we'll use `p` to referm to the term `Prop`, and `t n` to refer
-to the term `Universe (Type n)`.
+to the term `Sort (Type n)`.
 
-> p = Universe Prop
-> t = Universe . Type
+> p = Sort Prop
+> t = Sort . Type
 
 In the absense of concrete types, the simplest term I can think of is the polymorphic
 identity function. This function takes its argument type as input first, then an argument

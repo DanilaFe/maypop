@@ -17,16 +17,16 @@ First, a little utility function to compute the type of a type. This
 is straight out of the paper on the Calculus of Inductive Constructions.
 Prop has the type \\(\\text{Type}_0\\), and each type \\(\\text{Type}\_n\\) has type \\(\\text{Type}\_{n+1}\\).
 
-> nextUniverse :: Universe -> Universe
-> nextUniverse Prop = Type 0
-> nextUniverse (Type i) = Type $ i+1
+> nextSort :: Sort -> Sort
+> nextSort Prop = Type 0
+> nextSort (Type i) = Type $ i+1
 
 Type inference can fail, so let's define a type for any kind of error that can
 come up.
 
 > data TypeError
 >     = FreeVariable Int
->     | NotUniverse
+>     | NotSort
 >     | NotProduct
 >     | NotInductive
 >     | TypeError
@@ -53,11 +53,11 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >     if ta == targ
 >      then return (substitute 0 a tb)
 >      else throwError TypeError
-> infer (Prod a b) = extend' a $ \ua -> inferU b >>= \ub -> return $ Universe $
+> infer (Prod a b) = extend' a $ \ua -> inferS b >>= \ub -> return $ Sort $
 >     case ub of
 >         Prop -> Prop
->         t -> joinU ua t
-> infer (Universe u) = return $ Universe $ nextUniverse u
+>         t -> joinS ua t
+> infer (Sort u) = return $ Sort $ nextSort u
 > infer (Constr i ci) = withConstr $
 >     \c -> return $ foldr Prod (cReturn c) (iParams i ++ cParams c)
 >     where
@@ -66,7 +66,7 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >         cParamRefs c = map (+length (cParams c)) [0..length (iParams i) -1]
 >         cIndParams c = map Ref $ reverse $ cParamRefs c
 >         cReturn c = foldl App (Ind i) $ cIndParams c ++ cIndices c
-> infer (Ind i) = return $ foldr Prod (Universe $ iSort i) $ (iParams i ++ iArity i)
+> infer (Ind i) = return $ foldr Prod (Sort $ iSort i) $ (iParams i ++ iArity i)
 > infer (Case t i tt ts) = do
 >     (i', is) <- inferI t
 >     guardE TypeError $ i == i'
@@ -80,7 +80,7 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >         let et = substituteMany 0 (expt:inds') tt
 >         at <- offsetFree (negate $ length cps) <$> (extendAll cps $ infer b)
 >         guardE TypeError $ at == et
->     extendAll (tType: iArity i) $ inferU tt
+>     extendAll (tType: iArity i) $ inferS tt
 >     zipWithM constr (zip [0..] $ iConstructors i) ts
 >     return $ substituteMany 0 (t:inds) tt
 >
@@ -88,24 +88,24 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 > runInfer t = runReader (runExceptT $ infer t) []
 
 There are a few utility functions in the above definitions; let's take a look
-at all of them in turn.  First up is `inferU`. We need this function because
+at all of them in turn.  First up is `inferS`. We need this function because
 not all terms consitute valid types. For instance, a lambda function is _not_ a
-type, but it is a term. Indeed, computation aside, only the `Universe` constructor corresponds
+type, but it is a term. Indeed, computation aside, only the `Sort` constructor corresponds
 to a valid type. However, some constructs in the Calculus of Constructions specifically require types,
-such as \\(\\Pi\\). Thus, we'll define a way to "cast" a term into a valid univere. This will
+such as \\(\\Pi\\). Thus, we'll define a way to "cast" a term into a valid sort. This will
 be used to discard terms such as \\(\\Pi(\\lambda \\text{Prop}.0),\\text{Prop}\\), which have non-types in a
 place where a type is needed.
 
-> intoUniverse :: MonadError TypeError m => Term -> m Universe
-> intoUniverse (Universe u) = return u
-> intoUniverse _ = throwError NotUniverse
+> intoSort :: MonadError TypeError m => Term -> m Sort
+> intoSort (Sort u) = return u
+> intoSort _ = throwError NotSort
 
 We can use this to define a specialized version of `infer`:
 
-> inferU :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m Universe
-> inferU t = infer t >>= intoUniverse
+> inferS :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m Sort
+> inferS t = infer t >>= intoSort
 
-A similar casting function to `intoUniverse` is `intoProduct`, which helps
+A similar casting function to `intoSort` is `intoProduct`, which helps
 us require that a term is a dependent product (this is used for the application rule).
 We return the two terms composing a product type rather than returning a `Term`, which
 helps the type system "remember" that this is not just any term that passed our inspection.
@@ -137,12 +137,12 @@ that a type constructor is fully applied and well formed. Thus, we forego the `i
 function, and jump straight into `inferI`.
 
 > inferI :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m (Inductive, [Term])
-> inferI t = infer t >>= \tt -> inferU tt >> collectApps tt
+> inferI t = infer t >>= \tt -> inferS tt >> collectApps tt
 
 Next, we have to be careful about the rules of the Calculus of Constructions. We
 can't _just_ put a type straight from a lambda into the environment; it so happens
 that our types can be ill-formed! Thus, we need to first verify
-the well-formedness of our argument type (for that, it must be well formed _and_ a universe). 
+the well-formedness of our argument type (for that, it must be well formed _and_ a sort). 
 Furthermore, because types in the environment can refer to terms via DeBrujin
 indices, we must be careful to preserve these references inside the body of a lambda
 abstraction, leading us to use `offsetFree`. Thus, extending the environment looks like this:
@@ -150,8 +150,8 @@ abstraction, leading us to use `offsetFree`. Thus, extending the environment loo
 > extend :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m a -> m a
 > extend t m = extend' t $ const m
 >
-> extend' :: (MonadReader [Term] m, MonadError TypeError m) => Term -> (Universe -> m a) -> m a
-> extend' t f = inferU t >>= \u -> local (map (offsetFree 1) . (t:)) (f u)
+> extend' :: (MonadReader [Term] m, MonadError TypeError m) => Term -> (Sort -> m a) -> m a
+> extend' t f = inferS t >>= \u -> local (map (offsetFree 1) . (t:)) (f u)
 >
 > extendAll :: (MonadReader [Term] m, MonadError TypeError m) => [Term] -> m a -> m a
 > extendAll = flip (foldr extend)
@@ -165,8 +165,8 @@ there are "two" base types, Prop and Set. Thus, in the "real world", we don't ha
 a total order, but we do have a join semilattice.
 {{< /sidenote >}} and we can use our "join" function (aka "max") to find the supremum.
 
-> joinU :: Universe -> Universe -> Universe
-> joinU Prop Prop = Prop
-> joinU (Type i) (Type j) = Type $ max i j
-> joinU (Type i) _ = Type i
-> joinU _ (Type i) = Type i
+> joinS :: Sort -> Sort -> Sort
+> joinS Prop Prop = Prop
+> joinS (Type i) (Type j) = Type $ max i j
+> joinS (Type i) _ = Type i
+> joinS _ (Type i) = Type i

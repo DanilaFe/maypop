@@ -98,7 +98,7 @@ a list of its constructors (`iConstructors`) and, once again, a name (`iName`).
 > data Inductive = Inductive
 >     { iParams :: [Term]
 >     , iArity :: [Term]
->     , iSort :: Universe
+>     , iSort :: Sort
 >     , iConstructors :: [Constructor]
 >     , iName :: String
 >     }
@@ -152,17 +152,17 @@ for the second constructor).
 >     | Abs Term Term
 >     | App Term Term
 >     | Prod Term Term
->     | Universe Universe
+>     | Sort Sort
 >     | Constr Inductive Int
 >     | Ind Inductive
 >     | Case Term Inductive Term [Term]
 >     deriving Eq
 
 For convenience, we combine the references to the various
-universes (\\(\\text{Prop}\\) and \\(\\text{Type}_n\\)) into a data type,
-`Universe`:
+sorts (\\(\\text{Prop}\\) and \\(\\text{Type}_n\\)) into a data type,
+`Sort`:
 
-> data Universe = Prop | Type Int deriving (Eq, Show)
+> data Sort = Prop | Type Int deriving (Eq, Show)
 
 Having the term data type by itself is quite boring.
 There are a few helpful functions we can implement on terms.
@@ -387,7 +387,7 @@ And now, the pretty printer itself.
 >                 if occurs 0 t2
 >                  then return $ "∀(" ++ newName ++ ":" ++ st1 ++ ")." ++ st2
 >                  else return $ "(" ++ st1 ++ ") → " ++ st2
->             showM (Universe u) = return $ show u
+>             showM (Sort u) = return $ show u
 >             showM (Constr i ci) = return $ maybe "??" cName $ nth ci (iConstructors i)
 >             showM (Ind i) = return $ iName i
 >             showM (Case t i tt ts) = do
