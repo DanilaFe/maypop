@@ -45,9 +45,31 @@ We could then use `t` to refer to the type of elements in both the
 `Cons` and `Nil` constructors.
 
 Next up is the arity. Our inductive definition, in general, defines
-a type family indexed by terms in our language. This declaration
-lists the types of these indexing terms, `B1` through `Bm`. Each
-constructor must specify the indexing terms of corresponding types.
+a type family indexed by terms in our language. Unlike the parameters,
+the indexing terms _depend on the constructors_ of the data! For example,
+in a `Vec` data type (like [the one in Idris](http://docs.idris-lang.org/en/latest/tutorial/typesfuns.html#vectors)),
+the `Nil` constructor will have type `Vec Int 0`, but the `Cons` constructor
+will produce a value of type `Vec Int (n+1)`. We thus cannot count the length
+as a _parameter_ (as all contructors would then have to have the same length),
+but we _can_ specify the type of this argument. This is the point of the arity:
+it tells us the types of the indices which differ for each constructors,
+denoted `B1` through `Bm` in the above code snippet.
+
+Once all the parameters and indices are applied to a type constructor,
+it returns a type. What is the sort of this type? Is the new type
+a `Prop`, that is, a kind of proposition? Or is the new type a
+`Type 0`, that is,
+{{< sidenote "right" "impredicative-note" "a regular type?" >}}
+What's the difference between <code>Prop</code> and <code>Type 0</code>?
+Fundamentally, <code>Prop</code> is impredicative; things of sort
+<code>Prop</code> can be built from things quantified over <code>Prop</code>.
+This is a dangerous property, because it can quickly lead to inconsistent logical
+sytems (which we don't want, since we want to be able to prove things
+using Maypop). To combat this, all other sorts, like <code>Type 0</code>,
+are <em>not</em> impredicative.
+{{< /sidenote >}}
+We explicitly specify the sort returned from the type constructor;
+in the general definition, we refer to it as `s`.
 
 Finally, we have constructors. Constructors can take more arguments
 than have already been given via the parameters: the `Cons` constructor
@@ -55,9 +77,10 @@ of the above `List`, for instance, would accept two additional parameters, one
 of type `t` and one of type `List t`. The `Nil` constructor, on the other hand,
 would accept no additional parameters. Finally, each constructor must
 return the type family defined by the data type, applied to the aforementioned
-indexing terms.
+indexing terms: as I mentioned above, the `Vec` version of `Nil` returns `Vec Int 0`,
+and `Cons` returns `Vec Int (n+1)`.
 
-We encode this in the following two inductive definitions. In our view,
+We encode all this in the following two data type definitions. In our view,
 a constructor must have its own parameters (`cParams`), the index terms
 that it applies to the data type (`cIndices`), and it would be good
 (for debugging at the very least) for it to have a name (`cName`).
@@ -91,8 +114,8 @@ just compare their names.
 > instance Show Inductive where
 >     show = iName
 
-Finally, it's time to describe the terms in our language.
-We'll be using DeBrujin indices, so there will be
+With the details of inductive types out of the way, it's time to describe the terms in our language.
+We'll be using [DeBrujin indices](https://en.wikipedia.org/wiki/De_Bruijn_index), so there will be
 {{< sidenote "right" "no-strings-note" "no strings" >}}
 Except for the names of inductive datatypes and their constructors,
 but I hope to be able to eliminate this information in the final
@@ -104,7 +127,7 @@ terms in the language:
 * **A reference to a variable**. The integer argument in the argument is a DeBrujin index.
 * **A lambda abstraction**. There's no need to provide a variable name for this abstraction (once again, because of DeBrujin indexing), but we _do_ need to provide a type for the argument. Thus, the first term is the type, and the second term is the body of the lambda.
 * **An application**. There's not much more to say here.
-* **A dependent product**, which is a generalization of a function type. Once again, there's no need to define a variable, but there _is_ a need to provide the input an output type. Unlike a regular function, a dependent
+* **A dependent product**, which is a generalization of a function type. Once again, there's no need to define a variable, but there _is_ a need to provide the input and output type. Unlike a regular function, a dependent
 product's output type can depend on the value, and not just the type, of the input.
 * **A reference to a sort**, like \\(\\text{Prop}\\) or \\(\\text{Type}_0\\).
 * **An inductive type constructor**, referring to an inductively-defined type discussed above. We refer to it
@@ -322,10 +345,27 @@ In case we need multiple names, we can define `popNames` as follows:
 > popNames :: MonadState Names m => Int -> m [String]
 > popNames i = sequence $ replicate i popName
 
-{{< todo >}}Elaborate here.{{< /todo >}}
+We now have ways to generate fresh names; what remains is a way to
+make these names available to our pretty printer. While the `State`
+mond will be used to generate more and more fresh variable, a `Reader`
+monad will be used to represent the names corresponding to each DeBrujin
+index. This is simple enough to represent as a stack of names:
+the top name on the stack corresponds to DeBrujin index 0, the
+second name corresponds to DeBrujin index 1, and so on. When entering
+a lambda abstraction, we push a new varialbe name onto the stack,
+thus introducing a name for the new parameter, and at the same
+time offsetting the names of the previously existing parameters.
+
+It's easiest to define an operation that extends the stack with many
+names at once. Here and elsewhere, __I'll adopt the convention
+that the rightmost name / element in a list should correspond
+to the smallest DeBrujin index__. This corresponds to the intuition
+that in the term \\(\\lambda a. \\lambda b. \\lambda c. a \\ b \\ c\\),
+the equivalent DeBrujin index will be 0 for \\(c\\), 1 for \\(b\\),
+and 2 for \\(a\\).
 
 > extendNames :: MonadReader [String] m => [String] -> m a -> m a
-> extendNames ns m = foldr (local . (:)) m ns
+> extendNames ns = local (reverse ns++)
 
 And now, the pretty printer itself.
 
