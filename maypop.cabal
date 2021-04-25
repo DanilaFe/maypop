@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: a4f05d0ee9e254c59978e2c0b55a5c6d9adf67f8bc102cc1c36676a577513974
+-- hash: f52696dd255c2450bb175638d85ae18cb5e1fcf32916575a8b17294f3fb60cd4
 
 name:           maypop
 version:        0.1.0.0
@@ -58,7 +58,7 @@ executable maypop-exe
 
 test-suite maypop-test
   type: exitcode-stdio-1.0
-  main-is: Spec.hs
+  main-is: Spec.lhs
   other-modules:
       Paths_maypop
   hs-source-dirs:
