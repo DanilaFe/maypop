@@ -6,6 +6,7 @@ Here, I'll define what a Maypop "term" is.
 
 > {-# LANGUAGE FlexibleContexts #-}
 > module Language.Maypop.Syntax where
+> import Language.Maypop.InfiniteList
 > import Control.Applicative
 > import Control.Monad.Reader
 > import Control.Monad.Except
@@ -292,23 +293,10 @@ more readable to humans, we will use an infinite list of variable names, and
 assign to each abstraction a fresh name. It's conventional to distinguish different
 types of variables (plain variables, type variables) by using a different alphabet,
 but this requires typechecking, and that's a lot more work than I think a pretty printer
-should do. Thus, we'll just use a simple, infinite, homogenous list of names. We can
-define it as follows:
+should do. Thus, we'll just use a simple, infinite, list of names, using our
+`InfiniteList` module and its `InfList` type:
 
-> data Names = Cons String Names
-
-It's nice to be able to construct (the beginning of) an infinite list
-from a "regular" list. That's easy enough:
-
-> fromList :: [String] -> Names -> Names
-> fromList xs ns = foldr Cons ns xs
-
-We also want to be able to transform a single element of this list
-into many elements (we use this to build up longer and longer names
-as we run out of short ones).
-
-> expand :: (String -> [String]) -> Names -> Names
-> expand f (Cons x xs) = fromList (f x) (expand f xs)
+> type Names = InfList String
 
 Finally, we define an infinite list of names, which first consists
 of all single-letter names, and then all two letter names (alphabetically ordered),
@@ -318,25 +306,15 @@ and so on.
 > names = fromList (map return alphabet) $ expand (\s -> ((s++) . return) <$> alphabet) names
 >     where alphabet = ['a'..'z']
 
-Finally, we need ways to get the current head (next string) and the current tail (the rest of the names).
-Unlike those for list, these functions are guaranteed to be safe, since we can never exhaust our
-infinite list.
-
-> headN :: Names -> String
-> headN (Cons x _) = x
->
-> tailN :: Names -> Names
-> tailN (Cons _ xs) = xs
-
 Now we have all the machinery in place for wrangling our infinite
 list of varaible names. We'll be using a State monad to keep track
 of which names we have and haven't used. We can thus write a convenient
 operation to generate a fresh name in such a context. This operation
-generates a new name (by peeking at the infinite list of names via `headN`)
-and then removes it from the list (by setting the name list to its tail via `tailN`).
+generates a new name (by peeking at the infinite list of names via `headInf`)
+and then removes it from the list (by setting the name list to its tail via `tailInf`).
 
 > popName :: MonadState Names m => m String
-> popName = gets headN <* modify tailN
+> popName = gets headInf <* modify tailInf
 
 In case we need multiple names, we can define `popNames` as follows:
 
