@@ -48,3 +48,5 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - maypop
+    - QuickCheck >= 2.14.2 && < 3
+    - HUnit >= 1.6.0.0 && < 2
