@@ -3,6 +3,7 @@ Let's work on type inference a little.
 {{< todo >}}Seems like it would make sense to describe each case of Infer here.{{< /todo >}}
 
 > {-# LANGUAGE FlexibleContexts #-}
+> {-# LANGUAGE MultiParamTypeClasses #-}
 > module Language.Maypop.Checking where
 > import Language.Maypop.Syntax
 > import Control.Applicative
@@ -12,6 +13,7 @@ Let's work on type inference a little.
 > import Data.Bifunctor
 > import Data.Bool
 > import Debug.Trace
+> import qualified Data.Map
 
 First, a little utility function to compute the type of a type. This
 is straight out of the paper on the Calculus of Inductive Constructions.
@@ -170,3 +172,27 @@ a total order, but we do have a join semilattice.
 > joinS (Type i) (Type j) = Type $ max i j
 > joinS (Type i) _ = Type i
 > joinS _ (Type i) = Type i
+
+> class Unifiable a where
+>     unify :: MonadUnify m => a -> a -> m ()
+>
+> class (Monad m, Unifiable v) => MonadUnify k v m a where
+>     newVar    :: m k
+>     bindVar   :: k -> v -> m ()
+>     unifyVar  :: k -> k -> m ()
+>
+> data InfiniteList k = Cons k (InfiniteList k)
+>
+> data UnificationState k v = MkUState { vars :: Map k v, names :: InfiniteList k}
+>
+> newtype UnifyT k v m a = StateT (UnificationState k v) m a deriving (Functor, Applicative, Monad)
+>
+> instance (Monad m, Eq k, Unifiable v) => MonadUnify k v (UnifyT m k v) a where
+>     newVar = undefined
+>     bind k v = undefined
+>     runUnify k1 k2 = do
+>              v1 <- Data.Map.lookup k1
+>              v2 <- Data.Map.lookup k2
+>              unify v1 v2
+>
+>
