@@ -42,26 +42,65 @@ We assert as much.
 
 > test_ex1Type :: Test
 > test_ex1Type = TestCase $ assertType ex1 (Ind nat)
->
+
+The next example is the same function, except this time for
+finite natural numbers. In this function, we adjust the upper
+bound of the resulting number, since it is, after all, smaller.
+However, we can't create a natural number less than zero, so
+as input we have to accept a number less than at least 2. This
+example is general, insteaed of being applied to a specific number,
+so its type ends up:
+
+\$$
+\\forall (n : \\mathbb{N}). \\text{Fin} \\ (S \\ (S \\ n)) \\rightarrow \\text{Fin} (S \\ n)
+\$$
+
 > test_ex2Type :: Test
 > test_ex2Type = TestCase $ assertType ex2 $ Prod (Ind nat) $ Prod (App (Ind fin) (s $ s $ Ref 0)) $ App (Ind fin) $ s (Ref 1)
-> 
+
+This next example declares a function that unwraps an `Either` type whose
+two type parameters are the same. It is polymorphic over the type of elements
+inside of `Either`, but there's only one type parameter. We expect the
+type of this expression to be:
+
+\$$
+\\forall (\\alpha : \\text{Type 0}). \\text{Either} \\ \\alpha \\ \\alpha \\rightarrow \\alpha
+\$$
+
 > test_ex3Type :: Test
 > test_ex3Type = TestCase $ assertType ex3 $ Prod (Sort $ Type 0) $ Prod (apps (Ind either_) [Ref 0, Ref 0]) $ Ref 1
-> 
+
+Next up is a function to "flip" a pair of elements. It has to type parameters, each of
+which corresponds to the type of one of the elements of the pair. Once flipped, the pair's
+type parameters switch places. The type, then, is:
+
+\$$
+\\forall (\\alpha : \\text{Type 0}). \\forall (\\beta : \\text{Type 0}). \\text{Pair} \\ \\alpha \\ \\beta \\rightarrow \\text{Pair} \\ \\beta \\ \\alpha
+\$$
+
 > test_ex4Type :: Test
 > test_ex4Type = TestCase $ assertType ex4 $ Prod (Sort $ Type 0) $ Prod (Sort $ Type 0) $ Prod (apps (Ind pair_) [Ref 1, Ref 0]) $ apps (Ind pair_) [Ref 1, Ref 2]
-> 
+
+The fifth example merely applies the `Either` extraction function to the value `Left 3`. Its type,
+therefore, is once again just a natural number, \\(\\mathbb{N}\\).
+
 > test_ex5Type :: Test
 > test_ex5Type = TestCase $ assertType ex5 $ Ind nat
-> 
+
+The sixth example flips the pair `(3,2)`. It thus returns a value of type
+\\(\\text{Pair} \\ \\mathbb{N} \\ \\mathbb{N}\\).
+
 > test_ex6Type :: Test
 > test_ex6Type = TestCase $ assertType ex6 $ apps (Ind pair_) [Ind nat, Ind nat]
-> 
+
+Finally, we bundle all our unit tests for types into a single test case:
+
 > test_exTypes :: Test
 > test_exTypes = TestLabel "Example typs." $ TestList
 >     [ test_ex1Type, test_ex2Type, test_ex3Type, test_ex4Type, test_ex5Type, test_ex6Type ]
-> 
+
+And execute all the tests using `HUnit`'s `runTestTT`:
+
 > main :: IO Counts
 > main = runTestTT $ TestList
 >     [ TestCase $ quickCheck prop_typeNType
