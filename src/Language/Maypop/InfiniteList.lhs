@@ -1,4 +1,14 @@
+In this module, we'll define a small but useful construct: an infinite list.
+It frequently happens that we need an inexhaustible supply of _something_.
+When pretty printing an expression, we need an infinite supply of names
+that can be assigned to DeBrujin indices; when we perform unification,
+we need an infinite supply of fresh unifiction variables. 
+
 > module Language.Maypop.InfiniteList where
+
+The definition of an `InfList` is extremely simple. It's just a list
+without a base case! Thanks to Haskell's lazy evaluation, this
+is a perfectly valid data type, and behaves exactly like we want.
 
 > data InfList a = Cons a (InfList a)
 
