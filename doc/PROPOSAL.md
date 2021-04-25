@@ -1,4 +1,4 @@
-# Maypop Project Proposal
+## Maypop Project Proposal
 Our project is to implement a dependently typed programming language called Maypop, based on the Calculus of
 Inductive Constructions (the formal model used by Coq). The users of this language would be experienced functional
 programmers, who are comfortable with statically typed languages, especially in the Hindley-Milner style. This
@@ -17,7 +17,7 @@ comments, we'll be writing a "narrative" to guide the user through the code; thi
 through generating a static web site from the descriptions of the code. If all goes well, aside from a programming
 language, we'll have a website that serves as a tutorial to implementing your own little Maypop.
 
-# Objects and Concepts
+## Objects and Concepts
 The beauty of the Calculus of Inductive Constructions is that, in a way, there's only one "thing" in the entire
 domain: a term. Types are first-class values that can be passed around and manipulated; they are therefore terms.
 On the other hand, terms can be used within types (to express, for instance, a "list of length 3"). This
@@ -38,7 +38,7 @@ elements:
 The constructors of a data type, since they have a list of parameters, and produce a type indexed by some terms,
 can also be considered to be objects in our language.
   
-# Operations
+## Operations
 
 Two closely tied operations in our project will be type checking and type inference.
 Type checking discards invalid terms in the Calculus of Inductive Constructions, but it does not, necessarily, compute types.
@@ -57,7 +57,7 @@ to evaluate the expression `length xs`. Of course, even outside of type checking
 we'd need to support evaluating expressions, likely from a text file; what good is a language you can't
 actually interpret?
 
-# Course Ideas
+## Course Ideas
 I think most of all we'll be using Monads and Monad Transformers. Various operations in our language will require
 context (`Reader` monad), modify state (`State` monad) or fail (`Exception` monad). Additionally, things like
 unification and backtracking can be represented monadically too. It would be very convenient to use something
