@@ -40,7 +40,7 @@ executables:
 
 tests:
   maypop-test:
-    main:                Spec.hs
+    main:                Spec.lhs
     source-dirs:         test
     ghc-options:
     - -threaded
@@ -48,3 +48,5 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - maypop
+    - QuickCheck >= 2.14.2 && < 3
+    - HUnit >= 1.6.0.0 && < 2

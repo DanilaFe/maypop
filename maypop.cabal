@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 2527511d892b749b918423796cf4b176b1164ffb2d7560b474cfeb32542553f0
+-- hash: f52696dd255c2450bb175638d85ae18cb5e1fcf32916575a8b17294f3fb60cd4
 
 name:           maypop
 version:        0.1.0.0
@@ -58,14 +58,16 @@ executable maypop-exe
 
 test-suite maypop-test
   type: exitcode-stdio-1.0
-  main-is: Spec.hs
+  main-is: Spec.lhs
   other-modules:
       Paths_maypop
   hs-source-dirs:
       test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      HUnit >=1.6.0.0 && <2
+    , QuickCheck >=2.14.2 && <3
+    , base >=4.7 && <5
     , containers >=0.6.2.1 && <0.7
     , maypop
     , mtl >=2.2.2 && <3
