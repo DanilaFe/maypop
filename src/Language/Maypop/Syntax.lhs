@@ -1,6 +1,5 @@
 Here, I'll define what a Maypop "term" is.
 
-{{< todo >}}Extract the common typeclasses into a single class?{{< /todo >}}
 {{< todo >}}Inductive stuff has names? How does equality work?{{< /todo >}}
 {{< todo >}}Introduce binders.{{< /todo >}}
 
@@ -17,6 +16,7 @@ Here, I'll define what a Maypop "term" is.
 > import qualified Data.Set as Set
 >
 
+### Inductive Types
 Before we get started on the terms of the Calculus of Inductive Constructions,
 we need to talk about the "Inductive" part. We have inductive data types, more
 specifically inductive GADTs in our language. Each inductive data type accepts
@@ -113,6 +113,7 @@ just compare their names.
 > instance Show Inductive where
 >     show = iName
 
+### Terms
 With the details of inductive types out of the way, it's time to describe the terms in our language.
 We'll be using [DeBrujin indices](https://en.wikipedia.org/wiki/De_Bruijn_index), so there will be
 {{< sidenote "right" "no-strings-note" "no strings" >}}
@@ -163,6 +164,7 @@ sorts (\\(\\text{Prop}\\) and \\(\\text{Type}_n\\)) into a data type,
 
 > data Sort = Prop | Type Int deriving (Eq, Show)
 
+### Substitution etc., __etc.__
 Having the term data type by itself is quite boring.
 There are a few helpful functions we can implement on terms.
 One of these function is the classic substitution, which
@@ -288,6 +290,7 @@ occurs free becomes as simple as looking inside that list.
 > occurs :: Int -> Term -> Bool
 > occurs i = elem i . freeVars
 
+### A Pretty Printer
 How about a pretty printer? Our language is simple enough. To make our expressions
 more readable to humans, we will use an infinite list of variable names, and
 assign to each abstraction a fresh name. It's conventional to distinguish different
