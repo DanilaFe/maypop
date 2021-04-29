@@ -151,7 +151,9 @@ argument less than `n`.
 > fs :: Term -> Term -> Term
 > fs m = App (App (Constr fin 1) m)
 
-Let's also define an either data type.
+Let's also define an either data type. This type has two type parameters, which signify the
+types of the can be contained in it. `Either A B` can be either `Left x` for `x : A` or `Right y`,
+with `y : B`. In short, `Either` is effectively a coproduct, or sum type.
 
 > either_ :: Inductive
 > either_ = Inductive
@@ -164,14 +166,23 @@ Let's also define an either data type.
 >         , Constructor { cParams = [Ref 0], cIndices = [], cName = "Right" }
 >         ]
 >     }
->
+
+As before, it's nice to have Haskell functions to actually reference
+the constructors of the new data type. We'll define `inl`, which
+is the application of `Left` to first the two types parameters of the either type,
+and then a value of the first (left) type. Symmetrically, `inr`
+will be the application of `Right` first to the two types parameters of the either type,
+and then a value of the second (right) type.
+
 > inl :: Term -> Term -> Term -> Term
 > inl t1 t2 a = foldl App (Constr either_ 0) [t1, t2, a]
 >
 > inr :: Term -> Term -> Term -> Term
 > inr t1 t2 a = foldl App (Constr either_ 1) [t1, t2, a]
 
-And a pair data type.
+The dual of a sum type is a product type, also known as a pair type. This
+type also has two type parameters, but it only has a single constructor,
+which contains values of _both_ types.
 
 > pair_ :: Inductive
 > pair_ = Inductive
@@ -183,26 +194,64 @@ And a pair data type.
 >         [ Constructor { cParams = [Ref 1, Ref 1], cIndices = [], cName = "MkPair" }
 >         ]
 >     }
->
+
+This type's single constructor is translated into the Haskell helper function `mkPair`,
+which takes the two type parameters of the pair type, and then the two values of
+these respective types.
+
 > mkPair :: Term -> Term -> Term -> Term -> Term
 > mkPair t1 t2 v1 v2 = foldl App (Constr pair_ 0) [t1,t2,v1,v2]
 
-Let's do a little bit of pattern matcing, shall we?
+Let's do a little bit of pattern matcing, shall we? One of the simplest
+functions we can implement on data types is the predecessor function for
+natural numbers. Unlike the various helper functions for constructors,
+we'll actually define it as a lambda abstraction. This way we can pass
+it around without issue (and check its type!)
+
+> pred_ :: Term
+> pred_ = Abs (Ind nat) $ Case (Ref 0) nat (Ind nat) [n 0, Ref 0]
+
+We can define a similar function for bounded natural numbers. There's
+a catch: we can't take the predecessor of a number that's _less than zero_.
+In fact, it arguably doesn't make sense to take the predecessor of a number
+that's less than one. We thus require an input number less than \\(n+2\\), and
+return a natural number less than \\(n+1\\).
+
+> predFin :: Term
+> predFin = Abs (Ind nat) $ Abs (App (Ind fin) $ s $ s (Ref 0)) $ Case (Ref 0) fin (App (Ind fin) $ s (Ref 3)) [fz (Ref 2)]  -- FS case doesn't work
+
+A fairly interesting function on the `Either` data type is to extract whatever is
+inside the `Either`. This can only work if both the "left" and "right" types match
+up, which makes this function accept exactly one type parameter (and passing that type
+parameter twice to the `Either` type constructor).
+
+> unwrapEither :: Term
+> unwrapEither = Abs (t 0) $ Abs (App (App (Ind either_) (Ref 0)) (Ref 0)) $ Case (Ref 0) either_ (Ref 2) [Ref 0, Ref 0]
+
+For pairs, a simple operation we can implement in the `swap` function, which turns
+a pair like `(1,"Hello")` into a pair like `("Hello", 1)`. This function is our
+most tedious yet, since it must actually use its type parameters for more than
+naming the type of its input value. Indeed, the type parameters must be fed
+-- in a different order -- to the `MkPair` constructor used to create
+the return value.
+
+> swap_ :: Term
+> swap_ = Abs (t 0) $ Abs (t 0) $ Abs (App (App (Ind pair_) (Ref 1)) (Ref 0)) $ Case (Ref 0) pair_ (App (App (Ind pair_) (Ref 2)) (Ref 3)) [ mkPair (Ref 3) (Ref 4) (Ref 0) (Ref 1) ]
+
+Now that we have these functions, let's write down some examples. Our first few will be applications
+of our new functions to concrete values and types:
+
+* \\(\\text{ex1} = \\text{pred} \\ 3\\)
+* \\(\\text{ex2} = \\text{prefFin} \\ (2 : \\text{Fin} \\ 4) \\)
 
 > ex1 :: Term
-> ex1 = Case (n 3) nat (Ind nat) [n 0, Ref 0]
+> ex1 = App pred_ (n 3)
 >
 > ex2 :: Term
-> ex2 = Abs (Ind nat) $ Abs (App (Ind fin) $ s $ s (Ref 0)) $ Case (Ref 0) fin (App (Ind fin) $ s (Ref 3)) [fz (Ref 2)] -- FS case doesn't work
+> ex2 = apps predFin [n 2, fs (n 3) $ fs (n 2) $ fz (n 1)]
 >
 > ex3 :: Term
-> ex3 = Abs (t 0) $ Abs (App (App (Ind either_) (Ref 0)) (Ref 0)) $ Case (Ref 0) either_ (Ref 2) [Ref 0, Ref 0]
+> ex3 = apps unwrapEither [Ind nat, inl (Ind nat) (Ind nat) (n 3)]
 >
 > ex4 :: Term
-> ex4 = Abs (t 0) $ Abs (t 0) $ Abs (App (App (Ind pair_) (Ref 1)) (Ref 0)) $ Case (Ref 0) pair_ (App (App (Ind pair_) (Ref 2)) (Ref 3)) [ mkPair (Ref 3) (Ref 4) (Ref 0) (Ref 1) ]
->
-> ex5 :: Term
-> ex5 = App (App ex3 (Ind nat)) $ inl (Ind nat) (Ind nat) $ n 3
->
-> ex6 :: Term
-> ex6 = App (App (App ex4 (Ind nat)) (Ind nat)) $ mkPair (Ind nat) (Ind nat) (n 3) (n 6)
+> ex4 = apps swap_ [Ind nat, Ind nat, mkPair (Ind nat) (Ind nat) (n 3) (n 2)]
