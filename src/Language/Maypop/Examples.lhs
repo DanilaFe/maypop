@@ -241,8 +241,10 @@ the return value.
 Now that we have these functions, let's write down some examples. Our first few will be applications
 of our new functions to concrete values and types:
 
-* \\(\\text{ex1} = \\text{pred} \\ 3\\)
-* \\(\\text{ex2} = \\text{prefFin} \\ (2 : \\text{Fin} \\ 4) \\)
+* \\(\\text{ex1} = \\text{pred} \\ 3\\), which should evaluate to \\(2\\).
+* \\(\\text{ex2} = \\text{prefFin} \\ (2 : \\text{Fin} \\ 4) \\), which should evaluate to \\(1 : \\text{Fin} \\ 3\\).
+* \\(\\text{ex3} = \\text{unwrapEither} \\ (\\text{Left} \\ 3)\\), which should evaluate to \\(3\\).
+* \\(\\text{ex4} = \\text{swap} \\ (3, 2)\\), which should evaluate to \\((2,3)\\).
 
 > ex1 :: Term
 > ex1 = App pred_ (n 3)
