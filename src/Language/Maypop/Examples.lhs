@@ -257,3 +257,57 @@ of our new functions to concrete values and types:
 >
 > ex4 :: Term
 > ex4 = apps swap_ [Ind nat, Ind nat, mkPair (Ind nat) (Ind nat) (n 3) (n 2)]
+
+An interesting thing we could try to define is an _abstract data type_. We can do this
+by making the _constructor_ of the type be parameterized by some type, without parameterizing
+the type itself. For instance, we can define a `Countable` data type:
+
+> countable :: Inductive
+> countable = Inductive
+>     { iParams = []
+>     , iArity = []
+>     , iSort = Type 0
+>     , iName = "Countable"
+>     , iConstructors =
+>         [ Constructor { cParams = [t 0, (Ref 0), Prod (Ref 1) (Ind nat)], cIndices = [], cName = "Wrap" }
+>         ]
+>     }
+
+Once we pass it the type, that type is "gone". There are no guarantees we can make about
+it once we pattern match on, and unpack, an instance of `Countable`. All we'll know is
+that it's some type `a`, for which there is some value `x : a` and a function `f : a -> Nat`.
+This is our abstraction: no further information escapes from the data type. As usually, let's
+define a Haskell function to make it easier to call the `Wrap` constructor:
+
+> wrap :: Term -> Term -> Term -> Term
+> wrap t x f = apps (Constr countable 0) [t, x, f]
+
+If we can wrap, we can also unwrap. Without leaking the inner type (which we could
+do with a dependent pair, I suppose), the only thing we _really_ do is apply our
+counting function `f` to our wrapped value `x`, and return the result. Let's
+define `count` to do just that:
+
+> count :: Term
+> count = Abs (Ind countable) $ Case (Ref 0) countable (Ind nat) [App (Ref 0) (Ref 1)]
+
+What would be helpful now is a few examples of type `Countable`. The simplest countable
+"thing" is just a natural number. To convert a natural number into a natural number,
+it's safe to just use `id`:
+
+> ex5 = wrap (Ind nat) (n 5) (App id_ (Ind nat))
+
+Another "thing" that can be counted is \\(\\text{Either} \\ \\mathbb{N} \\ \\mathbb{N}\\).
+Our earlier `unwrapEither` function would be an excellent candidate for `f`: it would
+pull out a single natural number from the sum type. Here's the corresponding `Countable`
+instance:
+
+> ex6 = wrap (apps (Ind either_) [Ind nat, Ind nat]) (inl (Ind nat) (Ind nat) (n 7)) (App unwrapEither (Ind nat))
+
+Despite containing values of different types, our last two expressions have the same type: they're
+both `Countable`. We can feed them into `count` without providing any additional type parameters:
+
+> ex7 = App count ex5
+> ex8 = App count ex6
+
+This is effectively an abstract data type - we have a value that has only
+one operation (that we can count on): coutning.
