@@ -193,7 +193,7 @@ which we will represent with `MonadReader Int`. Then, we can
 define a generic operation that transforms __only free variable terms__,
 with other possible monadic effects captured by the arbitrary monad `m`:
 
-> transform :: MonadReader Int m => (Int -> m Term) -> Term -> m Term
+> transform :: MonadReader Int m => (Int -> m (ParamTerm a)) -> ParamTerm a -> m (ParamTerm a)
 > transform f = trans
 >     where
 >         trans (Ref m) = ask >>= \x -> if m >= x then f m else return (Ref m)
@@ -233,7 +233,7 @@ in a helper function `safeDec`:
 
 Finally, we can define substitution:
 
-> substitute :: Int -> Term -> Term -> Term
+> substitute :: Int -> ParamTerm a -> ParamTerm a -> ParamTerm a
 > substitute n t r = runReader (transform op r) 0
 >     where op i = (\x -> if i == n + x then offsetFree x t else Ref $ safeDec n x 1 i) <$> ask
 
@@ -242,7 +242,7 @@ Simply composing calls to `substitute` is not good enough, because a free variab
 by one term may be another target for substitution. To accomodate multiple substitutions,
 we can write another helper function, `substituteMany`:
 
-> substituteMany :: Int -> [Term] -> Term -> Term
+> substituteMany :: Int -> [ParamTerm a] -> ParamTerm a -> ParamTerm a
 > substituteMany n ts r = runReader (transform op r) 0
 >     where
 >         sub = zip [n..] (reverse ts)
@@ -264,7 +264,7 @@ the free varibles in a given expression. That's exactly what `offsetFree`
 does. This function is also a special case of the above `transform` operation,
 since it adds a constant number `o` to each free variable term it encounters.
 
-> offsetFree :: Int -> Term -> Term
+> offsetFree :: Int -> ParamTerm a -> ParamTerm a
 > offsetFree o t = runReader (transform op t) 0
 >     where op i = return $ Ref $ i + o
 
@@ -280,14 +280,14 @@ it intact (via `const (Ref i)`). When emitting, we need to be careful to subtrac
 the number of surrounding binders: \\(\\lambda.1\\) and \\(\\lambda.\\lambda.2\\)
 both refer to the same free variable.
 
-> freeVars :: Term -> [Int]
+> freeVars :: ParamTerm a -> [Int]
 > freeVars t = Set.toList $ snd $ runWriter $ runReaderT (transform op t) 0
 >     where op i = const (Ref i) <$> (ask >>= tell . Set.singleton . (i-))
 
 Since `freeVars` finds _all_ free variables in a term, checking if a single variable
 occurs free becomes as simple as looking inside that list.
 
-> occurs :: Int -> Term -> Bool
+> occurs :: Int -> ParamTerm a -> Bool
 > occurs i = elem i . freeVars
 
 How about a pretty printer? Our language is simple enough. To make our expressions

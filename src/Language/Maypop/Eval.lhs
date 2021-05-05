@@ -14,7 +14,7 @@ In normal-order evaluation, we reduce the leftmost, outermost
 redex. This means that function arguments are substituted into
 a function before they are evaluated.
 
-> eval :: Term -> Term
+> eval :: ParamTerm a -> ParamTerm a
 > eval (Abs l r) = Abs (eval l) (eval r)
 > eval (App l r) = case eval l of
 >     (Abs _ b) -> eval $ substitute 0 r b
@@ -27,7 +27,7 @@ a function before they are evaluated.
 >     return $ eval $ substituteMany 0 xs b
 > eval t = t
 
-> collectConstrApps :: Term -> Maybe ((Inductive, Int), [Term])
+> collectConstrApps :: ParamTerm a -> Maybe ((Inductive, Int), [ParamTerm a])
 > collectConstrApps t = second reverse <$> collect t
 >     where
 >         collect (App l r) = second (r:) <$> collect l

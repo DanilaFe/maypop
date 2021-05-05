@@ -119,7 +119,7 @@ We now implement unification for our `Term` type, using integers as our key as w
 straightforward. We see for cases on types like `App`, `Abs`, and `Prod` that have simple pairwise terms in their constructors have simple instances. 
 For more complex cases, such as `Case`, we have to do testing to ensure the integral keys line up too.   
 
-> instance Unifiable Int Term where
+> instance UnificationKey k => Unifiable k (ParamTerm k) where
 >     unify t1 t2 = unify' (eval t1) (eval t2)
 >         where
 >             unify' (Ref x1) (Ref x2) | x1 == x2 = return $ Ref x1
