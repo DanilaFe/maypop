@@ -8,12 +8,15 @@ used for type inference.
 > {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 > module Language.Maypop.Unification where
 > import Language.Maypop.InfiniteList
+> import Language.Maypop.Eval
+> import Language.Maypop.Syntax
 > import Control.Monad.State
 > import Control.Monad.Except
 > import Control.Applicative
 > import qualified Data.Map as Map
 > import qualified Data.Set as Set
 > import Data.Maybe
+
 
 First of all, variables in our unification framework should have an infinite
 supply. Instantiating a fresh variable is very common in unification; if would be
@@ -111,3 +114,23 @@ Last but not least, we define a data type for the unification state.
 >
 > popVar :: UnificationState k v -> (k, UnificationState k v)
 > popVar s = let Cons k ks = sVars s in (k, s { sVars = ks })
+
+We now implement unification for our `Term` type, using integers as our key as we are using De Bruijn indices elsewhere. Most of the cases are pretty 
+straightforward. We see for cases on types like `App`, `Abs`, and `Prod` that have simple pairwise terms in their constructors have simple instances. 
+For more complex cases, such as `Case`, we have to do testing to ensure the integral keys line up too.   
+
+> instance Unifiable Int Term where
+>   unify t1 t2 = unify' (eval t1) (eval t2) where
+>       unify' (Ref x) (Ref y)
+>                  | x == y                   = return $ Ref x
+>       unify' (Abs lx rx)  (Abs ly ry)       = liftA2 Abs (unify lx ly)  (unify rx ry)
+>       unify' (App lx rx)  (App ly ry)       = liftA2 App (unify lx ly)  (unify rx ry)
+>       unify' (Prod lx rx) (Prod ly ry)      = liftA2 Prod (unify lx ly) (unify rx ry)
+>       unify' (Sort s1) (Sort s2) | s1 == s2 = return $ Sort s1
+>       unify' (Constr ind1 x1) (Constr ind2 x2) 
+>                  | x1 == x2 && ind1 == ind2 = return $ Constr ind1 x2
+>       unify' (Ind x) (Ind y) 
+>                  | x == y                   = return $ Ind x
+>       unify' (Case t1 ind1 t2 ts1) (Case t3 ind2 t4 ts2)
+>                  | ind1 == ind2             = liftA3 (`Case` ind1) (unify t1 t3) (unify t2 t4) (zipWithM unify ts1 ts2)
+>       unify' _ _                            = throwError ()
