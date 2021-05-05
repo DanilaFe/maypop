@@ -16,6 +16,8 @@ used for type inference.
 > import qualified Data.Map as Map
 > import qualified Data.Set as Set
 > import Data.Maybe
+> import Data.Bifunctor
+> import Data.Functor.Identity
 
 
 First of all, variables in our unification framework should have an infinite
@@ -26,6 +28,11 @@ non-repeating list of their elements.
 
 > class UnificationKey k where
 >     keys :: InfList k
+
+{{< todo >}}Remove below instance, testing only!{{< /todo >}}
+
+> instance UnificationKey String where
+>     keys = names
 
 Next, we'll define an MTL-style typeclass that encapsulates unification functionality.
 Since
@@ -61,6 +68,12 @@ so the bulk of our work will be implementing the `MonadUnify` methods.
 > newtype UnifyT k v m a
 >     = MkUnifyT { unwrapUnifyT :: ExceptT () (StateT (UnificationState k v) m) a }
 >     deriving (Functor, Applicative, Monad, MonadError ())
+>
+> runUnifyT :: (Monad m, UnificationKey k) => UnifyT k v m a -> m (Either () a, Map.Map k (Set.Set k, Maybe v))
+> runUnifyT u = second sBound <$> runStateT (runExceptT $ unwrapUnifyT u) emptyState
+>
+> runUnify :: UnificationKey k => UnifyT k v Identity a -> (Either () a, Map.Map k (Set.Set k, Maybe v))
+> runUnify u = runIdentity $ runUnifyT u
 
 There are some helper functions we can define for our `UnifyT` type. For instance,
 we want to retrieve data from the underl2ing `State` monad: we'd like to know which
@@ -112,6 +125,9 @@ Last but not least, we define a data type for the unification state.
 
 > data UnificationState k v = MkUnificationState { sBound :: Map.Map k (Set.Set k, Maybe v), sVars :: InfList k }
 >
+> emptyState :: UnificationKey k => UnificationState k v
+> emptyState = MkUnificationState Map.empty keys
+>
 > popVar :: UnificationState k v -> (k, UnificationState k v)
 > popVar s = let Cons k ks = sVars s in (k, s { sVars = ks })
 
@@ -132,4 +148,7 @@ For more complex cases, such as `Case`, we have to do testing to ensure the inte
 >             unify' (Ind i1) (Ind i2) | i1 == i2 = return $ Ind i1
 >             unify' (Case t1 ind1 tt1 ts1) (Case t2 ind2 tt2 ts2)
 >                 | ind1 == ind2 = liftA3 (`Case` ind1) (unify t1 t2) (unify tt1 tt2) (zipWithM unify ts1 ts2)
+>             unify' (Param k1) (Param k2) = merge k1 k2 >> return (Param k1)
+>             unify' (Param k1) t = bind k1 t
+>             unify' t (Param k2) = bind k2 t
 >             unify' _ _ = throwError ()

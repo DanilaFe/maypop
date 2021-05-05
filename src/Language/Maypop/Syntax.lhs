@@ -5,6 +5,7 @@ Here, I'll define what a Maypop "term" is.
 
 > {-# LANGUAGE FlexibleContexts #-}
 > {-# LANGUAGE FlexibleInstances #-}
+> {-# LANGUAGE DeriveFunctor #-}
 > module Language.Maypop.Syntax where
 > import Language.Maypop.InfiniteList
 > import Control.Applicative
@@ -155,7 +156,7 @@ for the second constructor).
 >     | Constr Inductive Int
 >     | Ind Inductive
 >     | Case (ParamTerm a) Inductive (ParamTerm a) [(ParamTerm a)]
->     deriving Eq
+>     deriving (Eq, Functor)
 >
 > type Term = ParamTerm Void
 
@@ -347,11 +348,11 @@ and 2 for \\(a\\).
 
 And now, the pretty printer itself.
 
-> instance Show (ParamTerm Void) where
+> instance Show k => Show (ParamTerm k) where
 >     show t = fst $ runState (runReaderT (showM t) []) names
 >         where
 >             showM (Ref i) = nth i <$> ask >>= maybe (return $ "??" ++ show i) return
->             showM (Param p) = absurd p
+>             showM (Param p) = return $ show p
 >             showM (Abs t1 t2) = do
 >                 newName <- popName
 >                 st1 <- showM t1
