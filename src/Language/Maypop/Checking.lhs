@@ -5,13 +5,11 @@ Let's work on type inference a little.
 > {-# LANGUAGE FlexibleContexts #-}
 > module Language.Maypop.Checking where
 > import Language.Maypop.Syntax
-> import Control.Applicative
 > import Control.Monad.Reader
 > import Control.Monad.Except
-> import Control.Monad.State
 > import Data.Bifunctor
 > import Data.Bool
-> import Debug.Trace
+> import Data.Void
 
 First, a little utility function to compute the type of a type. This
 is straight out of the paper on the Calculus of Inductive Constructions.
@@ -46,6 +44,7 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 
 > infer :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m Term
 > infer (Ref n) = nth n <$> ask >>= maybe (throwError (FreeVariable n)) return
+> infer (Param p) = absurd p
 > infer (Abs t b) = Prod t <$> extend t (infer b)
 > infer (App f a) = do
 >     (ta, tb) <- inferP f

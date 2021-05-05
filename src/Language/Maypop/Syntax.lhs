@@ -4,15 +4,15 @@ Here, I'll define what a Maypop "term" is.
 {{< todo >}}Introduce binders.{{< /todo >}}
 
 > {-# LANGUAGE FlexibleContexts #-}
+> {-# LANGUAGE FlexibleInstances #-}
 > module Language.Maypop.Syntax where
 > import Language.Maypop.InfiniteList
 > import Control.Applicative
 > import Control.Monad.Reader
-> import Control.Monad.Except
 > import Control.Monad.State
 > import Control.Monad.Writer
-> import Data.Bool
 > import Data.List
+> import Data.Void
 > import qualified Data.Set as Set
 >
 
@@ -145,16 +145,19 @@ the `Term` argument is the expression for the type, and `[Term]` is a list
 of branches for each constructor (the first term in the list is the expression
 for the second constructor).
 
-> data Term
+> data ParamTerm a
 >     = Ref Int
->     | Abs Term Term
->     | App Term Term
->     | Prod Term Term
+>     | Param a
+>     | Abs (ParamTerm a) (ParamTerm a)
+>     | App (ParamTerm a) (ParamTerm a)
+>     | Prod (ParamTerm a) (ParamTerm a)
 >     | Sort Sort
 >     | Constr Inductive Int
 >     | Ind Inductive
->     | Case Term Inductive Term [Term]
+>     | Case (ParamTerm a) Inductive (ParamTerm a) [(ParamTerm a)]
 >     deriving Eq
+>
+> type Term = ParamTerm Void
 
 For convenience, we combine the references to the various
 sorts (\\(\\text{Prop}\\) and \\(\\text{Type}_n\\)) into a data type,
@@ -344,10 +347,11 @@ and 2 for \\(a\\).
 
 And now, the pretty printer itself.
 
-> instance Show Term where
+> instance Show (ParamTerm Void) where
 >     show t = fst $ runState (runReaderT (showM t) []) names
 >         where
 >             showM (Ref i) = nth i <$> ask >>= maybe (return $ "??" ++ show i) return
+>             showM (Param p) = absurd p
 >             showM (Abs t1 t2) = do
 >                 newName <- popName
 >                 st1 <- showM t1
@@ -382,5 +386,5 @@ that is built into Haskell. It'll come in handy in other modules, too.
 
 > nth :: Int -> [a] -> Maybe a
 > nth _ [] = Nothing
-> nth 0 (x:xs) = Just x
-> nth n (x:xs) = nth (n-1) xs
+> nth 0 (x:_) = Just x
+> nth n (_:xs) = nth (n-1) xs
