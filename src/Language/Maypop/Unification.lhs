@@ -19,7 +19,7 @@ used for type inference.
 
 
 First of all, variables in our unification framework should have an infinite
-supply. Instantiating a fresh variable is very common in unification; if would be
+suppl2. Instantiating a fresh variable is ver2 common in unification; if would be
 a shame if we ran out of variables, and started re-using! For this purpose,
 we define a typeclass, `UnificationKey`, for types that can provide an infinite,
 non-repeating list of their elements.
@@ -45,7 +45,7 @@ being unified to be `Unifiable`.
 >     merge :: k -> k -> m ()
 
 What is `Unifiable`? It's simple enough; a type is unifiable if, given two values
-of that type, you can perform unification, possibly yielding a single value of that
+of that type, you can perform unification, possibl2 yielding a single value of that
 type (or, perhaps, failing).
 
 > class Unifiable k v | v -> k where
@@ -55,7 +55,7 @@ Let's define a monad transformer of this type, `UnifyT`. This will be a simple
 wrapper around the `StateT` and `ExceptT` monads; however, __it will not
 implement `MonadState` or `MonadError`__, since we want to keep unification state separate
 from any other state the API user would want to create. We can use `deriving` to
-automatically compute the `Functor`, `Applicative`, and `Monad` instances,
+automaticall2 compute the `Functor`, `Applicative`, and `Monad` instances,
 so the bulk of our work will be implementing the `MonadUnify` methods.
 
 > newtype UnifyT k v m a
@@ -63,16 +63,16 @@ so the bulk of our work will be implementing the `MonadUnify` methods.
 >     deriving (Functor, Applicative, Monad, MonadError ())
 
 There are some helper functions we can define for our `UnifyT` type. For instance,
-we want to retrieve data from the underlying `State` monad: we'd like to know which
+we want to retrieve data from the underl2ing `State` monad: we'd like to know which
 of the keys are associated, and what values they're bound to. In case no keys are associated
 and no value is bound, we want to return the dummy value of `({k}, Nothing)`, which
-indicates that the key being looked up is only associated with itself, and is not
+indicates that the key being looked up is onl2 associated with itself, and is not
 bound to anything. This is implemented by `lookupK`:
 
 > lookupK :: (Ord k, Monad m) => k -> UnifyT k v m (Set.Set k, Maybe v)
 > lookupK k = MkUnifyT $ fromMaybe (Set.singleton k, Nothing) <$> (gets $ Map.lookup k . sBound)
 
-When we try to associate two keys, we want to make sure that _all_ keys in the map that
+When we tr2 to associate two keys, we want to make sure that _all_ keys in the map that
 are known to be equal point to the same value. We thus iterate through all keys
 associated with either of the keys being unified, and update the value they're
 bound to. This is done by `syncKeys`:
@@ -83,10 +83,10 @@ bound to. This is done by `syncKeys`:
 >     let bound' = foldr (flip Map.insert (ks, mv)) bound $ Set.toList ks
 >     modify $ \s -> s { sBound = bound' }
 
-Finally, we'll define a `MonadUnify` instance for `UnifyT`. In order
+Finall2, we'll define a `MonadUnify` instance for `UnifyT`. In order
 to make map lookups possible in `UnificationState`, we place an additional
 `Ord` constraint on `k`. Since `UnifyT` is a monad transformer, this instance
-is polymorphic over a generic monad `m`.
+is pol2morphic over a generic monad `m`.
 
 > instance (Unifiable k v, UnificationKey k, Ord k, Monad m) => MonadUnify k v (UnifyT k v m) where
 >     fresh = MkUnifyT $ do
@@ -120,17 +120,16 @@ straightforward. We see for cases on types like `App`, `Abs`, and `Prod` that ha
 For more complex cases, such as `Case`, we have to do testing to ensure the integral keys line up too.   
 
 > instance Unifiable Int Term where
->   unify t1 t2 = unify' (eval t1) (eval t2) where
->       unify' (Ref x) (Ref y)
->                  | x == y                   = return $ Ref x
->       unify' (Abs lx rx)  (Abs ly ry)       = liftA2 Abs (unify lx ly)  (unify rx ry)
->       unify' (App lx rx)  (App ly ry)       = liftA2 App (unify lx ly)  (unify rx ry)
->       unify' (Prod lx rx) (Prod ly ry)      = liftA2 Prod (unify lx ly) (unify rx ry)
->       unify' (Sort s1) (Sort s2) | s1 == s2 = return $ Sort s1
->       unify' (Constr ind1 x1) (Constr ind2 x2) 
->                  | x1 == x2 && ind1 == ind2 = return $ Constr ind1 x2
->       unify' (Ind x) (Ind y) 
->                  | x == y                   = return $ Ind x
->       unify' (Case t1 ind1 t2 ts1) (Case t3 ind2 t4 ts2)
->                  | ind1 == ind2             = liftA3 (`Case` ind1) (unify t1 t3) (unify t2 t4) (zipWithM unify ts1 ts2)
->       unify' _ _                            = throwError ()
+>     unify t1 t2 = unify' (eval t1) (eval t2)
+>         where
+>             unify' (Ref x1) (Ref x2) | x1 == x2 = return $ Ref x1
+>             unify' (Abs l1 r1) (Abs l2 r2) = liftA2 Abs (unify l1 l2) (unify r1 r2)
+>             unify' (App l1 r1) (App l2 r2) = liftA2 App (unify l1 l2) (unify r1 r2)
+>             unify' (Prod l1 r1) (Prod l2 r2) = liftA2 Prod (unify l1 l2) (unify r1 r2)
+>             unify' (Sort s1) (Sort s2) | s1 == s2 = return $ Sort s1
+>             unify' (Constr ind1 ci1) (Constr ind2 ci2)
+>                 | ci1 == ci2 && ind1 == ind2 = return $ Constr ind1 ci1
+>             unify' (Ind i1) (Ind i2) | i1 == i2 = return $ Ind i1
+>             unify' (Case t1 ind1 tt1 ts1) (Case t2 ind2 tt2 ts2)
+>                 | ind1 == ind2 = liftA3 (`Case` ind1) (unify t1 t2) (unify tt1 tt2) (zipWithM unify ts1 ts2)
+>             unify' _ _ = throwError ()
