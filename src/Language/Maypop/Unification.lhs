@@ -85,7 +85,7 @@ bound to anything. This is implemented by `lookupK`:
 > lookupK :: (Ord k, Monad m) => k -> UnifyT k v m (Set.Set k, Maybe v)
 > lookupK k = MkUnifyT $ fromMaybe (Set.singleton k, Nothing) <$> (gets $ Map.lookup k . sBound)
 
-When we tr2 to associate two keys, we want to make sure that _all_ keys in the map that
+When we try to associate two keys, we want to make sure that _all_ keys in the map that
 are known to be equal point to the same value. We thus iterate through all keys
 associated with either of the keys being unified, and update the value they're
 bound to. This is done by `syncKeys`:
