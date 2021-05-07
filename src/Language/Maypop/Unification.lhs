@@ -38,6 +38,7 @@ being unified to be `Unifiable`.
 >     fresh :: m k
 >     bind :: k -> v -> m v
 >     merge :: k -> k -> m ()
+>     reify :: v -> m v
 
 What is `Unifiable`? It's simple enough; a type is unifiable if, given two values
 of that type, you can perform unification, possibly yielding a single value of that
@@ -158,6 +159,7 @@ is polymorphic over a generic monad `m`.
 >                 syncKeys ks (Just v)
 >                 substituteInternal ks v
 >             _ -> syncKeys ks $ mv1 <|> mv2
+>     reify v = (`substituteAll` v) <$> (MkUnifyT $ gets bindingList)
 
 Last but not least, we define a data type for the unification state.
 {{< todo >}}Elaborate.{{< /todo >}}
