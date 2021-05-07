@@ -92,7 +92,7 @@ so the bulk of our work will be implementing the `MonadUnify` methods.
 > runUnifyT :: (Monad m, Infinite k, Unifiable k v) => UnifyT k v m a -> m (Either () a)
 > runUnifyT u = fst <$> runStateT (runExceptT $ unwrapUnifyT u) emptyState
 >
-> runUnify :: (Infinite k, Unifiable k v) => UnifyT k v Identity v -> Either () v
+> runUnify :: (Infinite k, Unifiable k v) => UnifyT k v Identity a -> Either () a
 > runUnify u = runIdentity $ runUnifyT u
 
 There are some helper functions we can define for our `UnifyT` type. For instance,
