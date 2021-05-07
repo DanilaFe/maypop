@@ -9,7 +9,7 @@ used for type inference.
 > module Language.Maypop.Unification where
 > import Language.Maypop.InfiniteList
 > import Language.Maypop.Eval
-> import Language.Maypop.Syntax
+> import Language.Maypop.Syntax hiding (occurs, substitute)
 > import Control.Monad.State
 > import Control.Monad.Except
 > import Control.Applicative
@@ -17,6 +17,7 @@ used for type inference.
 > import qualified Data.Set as Set
 > import Data.Maybe
 > import Data.Bifunctor
+> import Data.Semigroup
 > import Data.Functor.Identity
 
 
@@ -38,34 +39,65 @@ being unified to be `Unifiable`.
 >     merge :: k -> k -> m ()
 
 What is `Unifiable`? It's simple enough; a type is unifiable if, given two values
-of that type, you can perform unification, possibl2 yielding a single value of that
-type (or, perhaps, failing).
+of that type, you can perform unification, possibly yielding a single value of that
+type (or, perhaps, failing). We make this a multiparameter type class to encode
+the fact that unification can produce bindings of variables (keys `k`).
+
+While performing unification, we need to be careful: we don't want to yield
+infinite terms! For instance, unifying `a ~ (b -> a)` can create the infinite
+term `b -> b -> ...`. To avoid this, it's common to perform an "occurss check":
+we see if the value being bound to a unification variable contains that
+unification variable, and reject the binding in that case. The `Unifiable`
+class needs to also provide such an `occurs` method.
+
+Finally, when we're done performing unification, it would be very
+nice to replace occurences of _bound_ variables with the values they
+are bound to. For this, we also define a `substitute` method.
 
 > class Unifiable k v | v -> k where
 >     unify :: MonadUnify k v m => v -> v -> m v
+>     occurs :: k -> v -> Bool
+>     substitute :: k -> v -> v -> v
 
-Let's define a monad transformer of this type, `UnifyT`. This will be a simple
+With the three basic `Unifiable` operations in place, we can define
+some helper functions. As we said before, unification should fail
+when the "occurs check" fails; why not define a convenient little
+operation to fail (in some monadic context `m` supporting exceptions)
+when we detect an infinite type?
+
+> guardOccurs :: (MonadError () m, Unifiable k v) => k -> v -> m ()
+> guardOccurs k v = if occurs k v then throwError () else return ()
+
+After we're done with unification, we can have an entire map of
+variables and their bindings. We can define a little function that uses
+the basic `substitute` method to apply an entire map of unification bindings
+to our final value.
+
+> substituteAll :: Unifiable k v => Map.Map k v -> v -> v
+> substituteAll m v = foldr (uncurry substitute) v $ Map.toList m
+
+Next, let's define a monad transformer satisfying `MonadUnify`, which we'll call `UnifyT`. This will be a simple
 wrapper around the `StateT` and `ExceptT` monads; however, __it will not
 implement `MonadState` or `MonadError`__, since we want to keep unification state separate
 from any other state the API user would want to create. We can use `deriving` to
-automaticall2 compute the `Functor`, `Applicative`, and `Monad` instances,
+automatically compute the `Functor`, `Applicative`, and `Monad` instances,
 so the bulk of our work will be implementing the `MonadUnify` methods.
 
 > newtype UnifyT k v m a
 >     = MkUnifyT { unwrapUnifyT :: ExceptT () (StateT (UnificationState k v) m) a }
 >     deriving (Functor, Applicative, Monad, MonadError ())
 >
-> runUnifyT :: (Monad m, Infinite k) => UnifyT k v m a -> m (Either () a, Map.Map k (Set.Set k, Maybe v))
-> runUnifyT u = second sBound <$> runStateT (runExceptT $ unwrapUnifyT u) emptyState
+> runUnifyT :: (Monad m, Infinite k) => UnifyT k v m v -> m (Either () v)
+> runUnifyT u = fst <$> runStateT (runExceptT $ unwrapUnifyT u) emptyState
 >
-> runUnify :: Infinite k => UnifyT k v Identity a -> (Either () a, Map.Map k (Set.Set k, Maybe v))
+> runUnify :: Infinite k => UnifyT k v Identity v -> Either () v
 > runUnify u = runIdentity $ runUnifyT u
 
 There are some helper functions we can define for our `UnifyT` type. For instance,
-we want to retrieve data from the underl2ing `State` monad: we'd like to know which
+we want to retrieve data from the underlying `State` monad: we'd like to know which
 of the keys are associated, and what values they're bound to. In case no keys are associated
 and no value is bound, we want to return the dummy value of `({k}, Nothing)`, which
-indicates that the key being looked up is onl2 associated with itself, and is not
+indicates that the key being looked up is only associated with itself, and is not
 bound to anything. This is implemented by `lookupK`:
 
 > lookupK :: (Ord k, Monad m) => k -> UnifyT k v m (Set.Set k, Maybe v)
@@ -76,16 +108,17 @@ are known to be equal point to the same value. We thus iterate through all keys
 associated with either of the keys being unified, and update the value they're
 bound to. This is done by `syncKeys`:
 
-> syncKeys :: (Ord k, Monad m) => Set.Set k -> Maybe v -> UnifyT k v m ()
+> syncKeys :: (Ord k, Unifiable k v, Monad m) => Set.Set k -> Maybe v -> UnifyT k v m ()
 > syncKeys ks mv = MkUnifyT $ do
 >     bound <- gets sBound
->     let bound' = foldr (flip Map.insert (ks, mv)) bound $ Set.toList ks
+>     let lks = Set.toList ks
+>     let bound' = foldr (flip Map.insert (ks, mv)) bound' $ lks
 >     modify $ \s -> s { sBound = bound' }
 
-Finall2, we'll define a `MonadUnify` instance for `UnifyT`. In order
+Finally, we'll define a `MonadUnify` instance for `UnifyT`. In order
 to make map lookups possible in `UnificationState`, we place an additional
 `Ord` constraint on `k`. Since `UnifyT` is a monad transformer, this instance
-is pol2morphic over a generic monad `m`.
+is polymorphic over a generic monad `m`.
 
 > instance (Unifiable k v, Infinite k, Ord k, Monad m) => MonadUnify k v (UnifyT k v m) where
 >     fresh = MkUnifyT $ do
@@ -93,6 +126,7 @@ is pol2morphic over a generic monad `m`.
 >         put us >> return k
 >     bind k v = do
 >         (ks, mv) <- lookupK k
+>         mapM (`guardOccurs` v) $ Set.toList ks
 >         v' <- maybe (return v) (unify v) mv
 >         syncKeys ks (Just v')
 >         return v'
@@ -121,7 +155,7 @@ We now implement unification for our `Term` type, using integers as our key as w
 straightforward. We see for cases on types like `App`, `Abs`, and `Prod` that have simple pairwise terms in their constructors have simple instances. 
 For more complex cases, such as `Case`, we have to do testing to ensure the integral keys line up too.   
 
-> instance Infinite k => Unifiable k (ParamTerm k) where
+> instance (Eq k, Infinite k) => Unifiable k (ParamTerm k) where
 >     unify t1 t2 = unify' (eval t1) (eval t2)
 >         where
 >             unify' (Ref x1) (Ref x2) | x1 == x2 = return $ Ref x1
@@ -138,3 +172,12 @@ For more complex cases, such as `Case`, we have to do testing to ensure the inte
 >             unify' (Param k1) t = bind k1 t
 >             unify' t (Param k2) = bind k2 t
 >             unify' _ _ = throwError ()
+>     occurs = elem
+>     substitute k v = subst
+>         where
+>             subst (Abs l r) = Abs (subst l) (subst r)
+>             subst (App l r) = App (subst l) (subst r)
+>             subst (Prod l r) = Prod (subst l) (subst r)
+>             subst (Case t i tt ts) = Case (subst t) i (subst tt) (map subst ts)
+>             subst (Param k') | k == k' = v
+>             subst t = t
