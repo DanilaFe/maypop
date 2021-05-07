@@ -162,22 +162,44 @@ is polymorphic over a generic monad `m`.
 >     reify v = (`substituteAll` v) <$> (MkUnifyT $ gets bindingList)
 
 Last but not least, we define a data type for the unification state.
-{{< todo >}}Elaborate.{{< /todo >}}
+This consists of two things:
+
+* The bindings that we've already created in the process of unification,
+stored in `sBound`.
+* They keys (unification variables) that are as yet unbound, stored in `sVars`.
 
 > data UnificationState k v = MkUnificationState { sBound :: Map.Map k (Set.Set k, Maybe v), sVars :: InfList k }
->
+
+There are a few things we can implement for this data type. First of all,
+it's nice to have a handle on a "blank canvas" unification state, in
+which nothing has yet occured. This state has no variable bindings
+(and thus, its map is `empty`), and the entire infinite list of keys
+(ensured to be infinite by the `Infinite` typeclass) is just the branch new
+version, `infList`.
+
 > emptyState :: Infinite k => UnificationState k v
 > emptyState = MkUnificationState Map.empty infList
->
+
+Occasionally, we may want to replace all variables (whose values we know)
+for the terms they map to. For this, we need to retrieve
+the list of all variable bindings, which we will do using `bindingList`.
+
 > bindingList :: UnificationState k v -> [(k, v)]
 > bindingList = mapMaybe (\(k, (_, mv)) -> (k,) <$> mv) . Map.toList . sBound
->
+
+Finally, we write down a helper function to retrive a fresh variable
+name from a `UnificationState` (also returning the modified
+version of the state in which the newly popped variable is
+no longer in the "fresh" list):
+
 > popVar :: UnificationState k v -> (k, UnificationState k v)
 > popVar s = let Cons k ks = sVars s in (k, s { sVars = ks })
 
-We now implement unification for our `Term` type, using integers as our key as we are using De Bruijn indices elsewhere. Most of the cases are pretty 
-straightforward. We see for cases on types like `App`, `Abs`, and `Prod` that have simple pairwise terms in their constructors have simple instances. 
-For more complex cases, such as `Case`, we have to do testing to ensure the integral keys line up too.   
+We now implement unification for our `Term` type. Two terms only unify if they are built
+using the same constructor; thus, we mostly include those cases in our pattern matching.
+For cases like `App`, `Abs`, and `Prod`, two recursive calls to `unify` suffice; however,
+for more complex terms such as `Case`, we have to do testing to ensure that the non-`Term`
+data matches, too.
 
 > instance (Eq k, Infinite k) => Unifiable k (ParamTerm k) where
 >     unify t1 t2 = unify' (eval t1) (eval t2)
