@@ -44,7 +44,7 @@ stack test
 
 The test suite is currently the best place to look for example
 inputs. Check out the [`Spec`](https://web.engr.oregonstate.edu/~fedorind/CS583/modules/spec/)
-p Iage, which includes not only the Haskell representation of various example
+page, which includes not only the Haskell representation of various example
 terms, but also explanations on why these terms have particular types.
 It even has neatly rendered mathematical notation! If the page is down,
 the `Spec.lhs` file in `src/` will include the same information (albeit in
