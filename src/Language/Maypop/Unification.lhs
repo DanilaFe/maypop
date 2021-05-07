@@ -111,7 +111,23 @@ bound to. This is done by `syncKeys`:
 > syncKeys ks mv = MkUnifyT $ do
 >     bound <- gets sBound
 >     let lks = Set.toList ks
->     let bound' = foldr (flip Map.insert (ks, mv)) bound' $ lks
+>     let bound' = foldr (flip Map.insert (ks, mv)) bound $ lks
+>     modify $ \s -> s { sBound = bound' }
+
+When we bind a value to a key, we want to make sure that the
+key referring to this value no longer occurs anywhere in
+our substitution map. This is to ensure that occurs checks work
+correctly: for a map \\(\\{k_1\\mapsto k_2\\}\\), the term
+\\(k_1\\) does not syntactically contain \\(k_2\\), but binding
+\\(k_2 \\mapsto k_1\\) is certainly not allowed. Thus, when
+we introduce a binding \\(k_1 \\mapsto k_2\\), we will
+take care to rewrite terms like \\(k_1\\) into \\(k_2\\).
+
+> substituteInternal :: (Ord k, Monad m, Unifiable k v) => Set.Set k -> v -> UnifyT k v m ()
+> substituteInternal ks v = MkUnifyT $ do
+>     bound <- gets sBound
+>     let lks = Set.toList ks
+>     let bound' = foldr (\k -> Map.map (second $ fmap $ substitute k v)) bound lks
 >     modify $ \s -> s { sBound = bound' }
 
 Finally, we'll define a `MonadUnify` instance for `UnifyT`. In order
@@ -128,6 +144,7 @@ is polymorphic over a generic monad `m`.
 >         mapM (`guardOccurs` v) $ Set.toList ks
 >         v' <- maybe (return v) (unify v) mv
 >         syncKeys ks (Just v')
+>         substituteInternal ks v'
 >         return v'
 >     merge k1 k2 = do
 >         (ks1, mv1) <- lookupK k1         
@@ -137,6 +154,7 @@ is polymorphic over a generic monad `m`.
 >             (Just v1, Just v2) -> do
 >                 v <- unify v1 v2
 >                 syncKeys ks (Just v)
+>                 substituteInternal ks v
 >             _ -> syncKeys ks $ mv1 <|> mv2
 
 Last but not least, we define a data type for the unification state.
