@@ -6,6 +6,7 @@ used for type inference.
 > {-# LANGUAGE FlexibleContexts #-}
 > {-# LANGUAGE FunctionalDependencies #-}
 > {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+> {-# LANGUAGE TupleSections #-}
 > module Language.Maypop.Unification where
 > import Language.Maypop.InfiniteList
 > import Language.Maypop.Eval
@@ -15,6 +16,7 @@ used for type inference.
 > import Control.Applicative
 > import qualified Data.Map as Map
 > import qualified Data.Set as Set
+> import Data.Tuple
 > import Data.Maybe
 > import Data.Bifunctor
 > import Data.Functor.Identity
@@ -69,11 +71,11 @@ when we detect an infinite type?
 
 After we're done with unification, we can have an entire map of
 variables and their bindings. We can define a little function that uses
-the basic `substitute` method to apply an entire map of unification bindings
-to our final value.
+the basic `substitute` method to apply an entire map (in the form of a list
+of pairs) of unification bindings to our final value.
 
-> substituteAll :: Unifiable k v => Map.Map k v -> v -> v
-> substituteAll m v = foldr (uncurry substitute) v $ Map.toList m
+> substituteAll :: Unifiable k v => [(k, v)] -> v -> v
+> substituteAll m v = foldr (uncurry substitute) v m
 
 Next, let's define a monad transformer satisfying `MonadUnify`, which we'll call `UnifyT`. This will be a simple
 wrapper around the `StateT` and `ExceptT` monads; however, __it will not
@@ -86,10 +88,10 @@ so the bulk of our work will be implementing the `MonadUnify` methods.
 >     = MkUnifyT { unwrapUnifyT :: ExceptT () (StateT (UnificationState k v) m) a }
 >     deriving (Functor, Applicative, Monad, MonadError ())
 >
-> runUnifyT :: (Monad m, Infinite k) => UnifyT k v m v -> m (Either () v)
+> runUnifyT :: (Monad m, Infinite k, Unifiable k v) => UnifyT k v m a -> m (Either () a)
 > runUnifyT u = fst <$> runStateT (runExceptT $ unwrapUnifyT u) emptyState
 >
-> runUnify :: Infinite k => UnifyT k v Identity v -> Either () v
+> runUnify :: (Infinite k, Unifiable k v) => UnifyT k v Identity v -> Either () v
 > runUnify u = runIdentity $ runUnifyT u
 
 There are some helper functions we can define for our `UnifyT` type. For instance,
@@ -164,6 +166,9 @@ Last but not least, we define a data type for the unification state.
 >
 > emptyState :: Infinite k => UnificationState k v
 > emptyState = MkUnificationState Map.empty infList
+>
+> bindingList :: UnificationState k v -> [(k, v)]
+> bindingList = mapMaybe (\(k, (_, mv)) -> (k,) <$> mv) . Map.toList . sBound
 >
 > popVar :: UnificationState k v -> (k, UnificationState k v)
 > popVar s = let Cons k ks = sVars s in (k, s { sVars = ks })
