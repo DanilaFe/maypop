@@ -17,7 +17,6 @@ used for type inference.
 > import qualified Data.Set as Set
 > import Data.Maybe
 > import Data.Bifunctor
-> import Data.Semigroup
 > import Data.Functor.Identity
 
 
@@ -108,7 +107,7 @@ are known to be equal point to the same value. We thus iterate through all keys
 associated with either of the keys being unified, and update the value they're
 bound to. This is done by `syncKeys`:
 
-> syncKeys :: (Ord k, Unifiable k v, Monad m) => Set.Set k -> Maybe v -> UnifyT k v m ()
+> syncKeys :: (Ord k, Monad m) => Set.Set k -> Maybe v -> UnifyT k v m ()
 > syncKeys ks mv = MkUnifyT $ do
 >     bound <- gets sBound
 >     let lks = Set.toList ks
