@@ -20,21 +20,7 @@ used for type inference.
 > import Data.Functor.Identity
 
 
-First of all, variables in our unification framework should have an infinite
-suppl2. Instantiating a fresh variable is ver2 common in unification; if would be
-a shame if we ran out of variables, and started re-using! For this purpose,
-we define a typeclass, `UnificationKey`, for types that can provide an infinite,
-non-repeating list of their elements.
-
-> class UnificationKey k where
->     keys :: InfList k
-
-{{< todo >}}Remove below instance, testing only!{{< /todo >}}
-
-> instance UnificationKey String where
->     keys = names
-
-Next, we'll define an MTL-style typeclass that encapsulates unification functionality.
+We'll define an MTL-style typeclass that encapsulates unification functionality.
 Since
 {{< sidenote "right" "fail-note" "the unification operation can fail," >}}
 For instance, what's the result of unifying the expressions <code>3</code> and <code>4</code>? 
@@ -42,10 +28,10 @@ For instance, what's the result of unifying the expressions <code>3</code> and <
 we'll add a `MonadFail` constraint to the carrier monad. Other than that, our `MonadUnify`
 typeclass will be parameterized by the type of the unification variables `k` and
 type of the stuff bound to the unification variables `v`. We also require the
-unification variables to be infinite (via `UnificationKey`), and for the values
+unification variables to be infinite (via the `Infinite` typeclass from `InfiniteList`), and for the values
 being unified to be `Unifiable`.
 
-> class (MonadError () m, Unifiable k v, UnificationKey k)
+> class (MonadError () m, Unifiable k v, Infinite k)
 >         => MonadUnify k v m | m -> k, m -> v where
 >     fresh :: m k
 >     bind :: k -> v -> m v
@@ -69,10 +55,10 @@ so the bulk of our work will be implementing the `MonadUnify` methods.
 >     = MkUnifyT { unwrapUnifyT :: ExceptT () (StateT (UnificationState k v) m) a }
 >     deriving (Functor, Applicative, Monad, MonadError ())
 >
-> runUnifyT :: (Monad m, UnificationKey k) => UnifyT k v m a -> m (Either () a, Map.Map k (Set.Set k, Maybe v))
+> runUnifyT :: (Monad m, Infinite k) => UnifyT k v m a -> m (Either () a, Map.Map k (Set.Set k, Maybe v))
 > runUnifyT u = second sBound <$> runStateT (runExceptT $ unwrapUnifyT u) emptyState
 >
-> runUnify :: UnificationKey k => UnifyT k v Identity a -> (Either () a, Map.Map k (Set.Set k, Maybe v))
+> runUnify :: Infinite k => UnifyT k v Identity a -> (Either () a, Map.Map k (Set.Set k, Maybe v))
 > runUnify u = runIdentity $ runUnifyT u
 
 There are some helper functions we can define for our `UnifyT` type. For instance,
@@ -101,7 +87,7 @@ to make map lookups possible in `UnificationState`, we place an additional
 `Ord` constraint on `k`. Since `UnifyT` is a monad transformer, this instance
 is pol2morphic over a generic monad `m`.
 
-> instance (Unifiable k v, UnificationKey k, Ord k, Monad m) => MonadUnify k v (UnifyT k v m) where
+> instance (Unifiable k v, Infinite k, Ord k, Monad m) => MonadUnify k v (UnifyT k v m) where
 >     fresh = MkUnifyT $ do
 >         (k, us) <- gets popVar
 >         put us >> return k
@@ -125,8 +111,8 @@ Last but not least, we define a data type for the unification state.
 
 > data UnificationState k v = MkUnificationState { sBound :: Map.Map k (Set.Set k, Maybe v), sVars :: InfList k }
 >
-> emptyState :: UnificationKey k => UnificationState k v
-> emptyState = MkUnificationState Map.empty keys
+> emptyState :: Infinite k => UnificationState k v
+> emptyState = MkUnificationState Map.empty infList
 >
 > popVar :: UnificationState k v -> (k, UnificationState k v)
 > popVar s = let Cons k ks = sVars s in (k, s { sVars = ks })
@@ -135,7 +121,7 @@ We now implement unification for our `Term` type, using integers as our key as w
 straightforward. We see for cases on types like `App`, `Abs`, and `Prod` that have simple pairwise terms in their constructors have simple instances. 
 For more complex cases, such as `Case`, we have to do testing to ensure the integral keys line up too.   
 
-> instance UnificationKey k => Unifiable k (ParamTerm k) where
+> instance Infinite k => Unifiable k (ParamTerm k) where
 >     unify t1 t2 = unify' (eval t1) (eval t2)
 >         where
 >             unify' (Ref x1) (Ref x2) | x1 == x2 = return $ Ref x1

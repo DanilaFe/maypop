@@ -303,11 +303,14 @@ should do. Thus, we'll just use a simple, infinite, list of names, using our
 
 Finally, we define an infinite list of names, which first consists
 of all single-letter names, and then all two letter names (alphabetically ordered),
-and so on.
+and so on. We don't actually do this here; it so happens that such an infinite
+list can also be used in other parts of Maypop. Things that have associated
+infinite lists are instances of the `Infinite` typeclass (also defined
+in the `InfiniteList` module); we use `String`'s instance to create
+our list of names:
 
 > names :: Names
-> names = fromList (map return alphabet) $ expand (\s -> ((s++) . return) <$> alphabet) names
->     where alphabet = ['a'..'z']
+> names = infList
 
 Now we have all the machinery in place for wrangling our infinite
 list of varaible names. We'll be using a State monad to keep track
