@@ -115,17 +115,28 @@ just compare their names.
 >     show = iName
 
 With the details of inductive types out of the way, it's time to describe the terms in our language.
-We'll be using [DeBrujin indices](https://en.wikipedia.org/wiki/De_Bruijn_index), so there will be
-{{< sidenote "right" "no-strings-note" "no strings" >}}
-Except for the names of inductive datatypes and their constructors,
-but I hope to be able to eliminate this information in the final
-version of the project.
-{{< /sidenote >}}(and thus,
-no need to perform any complicated alpha renaming). We have the following
+There's a little trick to the way that we will define them: we'll parameterize
+our term datatype, making it, in general, a type constructor. We'll call this
+type constructor `ParamTerm`. The paramter in the expression is the type of the unification
+variables it may contain; `ParamTerm String` will contain all the constructs
+in our language, as well as unification variables of type `String`. We don't
+always want to allow unification variables in our expression (for instance,
+they are meaningless in definitions of constructors and inductive data types). To represent
+such variable-less expressions,
+we will use `Void` as the type of unification variables. Since it is imposible
+to construct an instance of type `Void`, it will be imposible to create a `ParamTerm Void`
+that contains unification variables.
+
+We'll be using [DeBrujin indices](https://en.wikipedia.org/wiki/De_Bruijn_index), so variables will not
+be represented as strings (and thus, no need to perform any complicated alpha renaming). We have the following
 terms in the language:
 
-* **A reference to a variable**. The integer argument in the argument is a DeBrujin index.
-* **A lambda abstraction**. There's no need to provide a variable name for this abstraction (once again, because of DeBrujin indexing), but we _do_ need to provide a type for the argument. Thus, the first term is the type, and the second term is the body of the lambda.
+* **A reference to a variable**. The integer argument to the constructor is a DeBrujin index.
+* **A lambda abstraction**. There's no need to provide a variable name for this abstraction (once again, because of DeBrujin indexing), but
+{{< sidenote "right" "explicit-lambda-note" "we do need to provide a type for the parameter." >}}
+The core Calculus of Inductive Constructions is explicitly typed. This is why we need to specify
+the type of the lambda function's parameter.
+{{< /sidenote >}} Thus, the first term is the type, and the second term is the body of the lambda.
 * **An application**. There's not much more to say here.
 * **A dependent product**, which is a generalization of a function type. Once again, there's no need to define a variable, but there _is_ a need to provide the input and output type. Unlike a regular function, a dependent
 product's output type can depend on the value, and not just the type, of the input.
