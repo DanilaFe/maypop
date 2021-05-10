@@ -18,11 +18,17 @@ Here, I'll define what a Maypop "term" is.
 > import qualified Data.Set as Set
 >
 
-Before we get started on the terms of the Calculus of Inductive Constructions,
-we need to talk about the "Inductive" part. We have inductive data types, more
-specifically inductive GADTs in our language. Each inductive data type accepts
-some parameters, an "arity" declaration, and constructors. In general, the
-paper I'm using as reference defines the following form:
+When writing a program in Maypop, a user will likely put down two types
+of definitions: data types (pair, list, optional) and code (functions).
+Both of these rely in some manner on terms (expressions) in the Maypop
+language; we'll get to those shortly.
+
+The first kind of definition that we will look at is that of inductive
+data types. After all, it's the Calculus of _Inductive_ Constructions!
+Our language will have inductive data types, more specifically inductive GADTs.
+Each inductive data type accepts some parameters, an "arity" declaration,
+and constructors. In general, the paper I'm using as reference defines the
+following form (in Coq-like syntax):
 
 ```
 Inductive I (p1 : A1) ... (pn : An) : B1 -> ... -> Bm -> s where
@@ -114,7 +120,80 @@ just compare their names.
 > instance Show Inductive where
 >     show = iName
 
-With the details of inductive types out of the way, it's time to describe the terms in our language.
+So those are data type definitions. The next type of definition is a function
+definition. It would something like the following:
+
+```
+factorial : Nat -> Nat
+factorial n =
+    case n of
+        O -> O
+        (S n') -> n * factorial n'
+```
+
+Notice that this is not a term in itself; the above five lines don't
+quite evaluate to anyting. They do, however, tell the interpreter 
+about a function `factorial`, and its body. They also provide
+a tiny amount of extra information: the expected return type of the function.
+In an explicitly typed lambda calculus, this information is not provided
+by a lambda abstraction: the return type is computed from the body. It's nice,
+if even from a documentation perspective, to immediately see the return type
+of a function. We will thus follow this syntax, and check the expected
+return type against the computed type of the function definition's body.
+
+Before we get to that, though, let's define a data structure for a function
+definition. This isn't particularly difficult; we need only the name,
+arity (number of parameters), return type, and body of the function. This
+is a little different from the way that we defined our inductive data type;
+there, the "arity" was an explicit list of argument types for the 
+inductive type constructor. This is because we can very well have cases
+where the return type depends on the previous arguments, and also
+because this type can be a reference to another definition. Consider,
+for instance, the following snippet, inpired by an example from Philip
+Wadler's _Monads for Functional Programming_:
+
+```
+eval : Expr -> State Int
+eval e s = ...
+```
+
+Even though there are two arguments (the expression `e` being evaluated
+and the state `s` from the state monad implementation), the type
+only lists one. This is because `State x` can be written as:
+
+```
+State : Type -> Type
+State t = StateData -> (StateData, t)
+```
+
+We want to allow these kinds of definitions, and thus, we won't strongly
+tie the number of arguments to the types of these arguments.
+
+With that out of the way, here's our data structure for function
+definitions:
+
+> data Definition = Definition
+>     { dName :: String
+>     , dArity :: Int
+>     , dType :: Term
+>     , dBody :: Term
+>     }
+
+One moment, though. What about the parameter names, like `n` from
+the `factorial` example above? It so happens that we will be using DeBrujin
+indices instead of strings for variable references. Thus, it 
+{{< sidenote "right" "names-note" "doesn't do us much good" >}}
+It would be good for debugging, of course. In our implementation, though,
+we sidestep this particular issue for now.
+{{< /sidenote >}} to keep track of what variable is named what.
+
+Just like we did with inductive definitions, let's give `Definition`
+an `Eq` instance based on its name:
+
+> instance Eq Definition where
+>     d1 == d2 = dName d1 == dName d2
+
+With the details of definitions out of the way, it's time to describe the terms in our language.
 There's a little trick to the way that we will define them: we'll parameterize
 our term datatype, making it, in general, a type constructor. We'll call this
 type constructor `ParamTerm`. The paramter in the expression is the type of the unification
