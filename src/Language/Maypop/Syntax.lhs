@@ -211,6 +211,8 @@ be represented as strings (and thus, no need to perform any complicated alpha re
 terms in the language:
 
 * **A reference to a variable**. The integer argument to the constructor is a DeBrujin index.
+* **A reference to a global definition**. This will behave differently from
+references to function arguments and the like.
 * **A lambda abstraction**. There's no need to provide a variable name for this abstraction (once again, because of DeBrujin indexing), but
 {{< sidenote "right" "explicit-lambda-note" "we do need to provide a type for the parameter." >}}
 The core Calculus of Inductive Constructions is explicitly typed. This is why we need to specify
@@ -239,6 +241,7 @@ for the second constructor).
 
 > data ParamTerm a
 >     = Ref Int
+>     | Def Definition
 >     | Param a
 >     | Abs (ParamTerm a) (ParamTerm a)
 >     | App (ParamTerm a) (ParamTerm a)
@@ -446,6 +449,7 @@ And now, the pretty printer itself.
 >     show t = fst $ runState (runReaderT (showM t) []) names
 >         where
 >             showM (Ref i) = nth i <$> ask >>= maybe (return $ "??" ++ show i) return
+>             showM (Def d) = return $ dName d
 >             showM (Param p) = return $ show p
 >             showM (Abs t1 t2) = do
 >                 newName <- popName

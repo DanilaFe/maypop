@@ -44,6 +44,7 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 
 > infer :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m Term
 > infer (Ref n) = nth n <$> ask >>= maybe (throwError (FreeVariable n)) return
+> infer (Def d) = return $ dType d
 > infer (Param p) = absurd p
 > infer (Abs t b) = Prod t <$> extend t (infer b)
 > infer (App f a) = do
