@@ -314,5 +314,8 @@ both `Countable`. We can feed them into `count` without providing any additional
 This is effectively an abstract data type - we have a value that has only
 one operation (that we can count on): coutning.
 
+Let's also write some examples of actual modules in our language. We can, for
+instance, re-use the module for natural numbers we defined earlier.
+
 > natMod = Module (MkSymbol ["Nat", "Data"])
 >     $ Map.fromList [("ℕ", Definition Public $ Left nat), ("pred", Definition Public $ Right (Function "pred" 1 (Prod (Ind nat) (Ind nat)) pred_))]
