@@ -36,7 +36,7 @@ is met, failing if it isn't. Aside from the condition, we need to
 provide information about what actually went wrong, in the form
 of a `TypeError`:
 
-> guardE :: MonadError TypeError m => TypeError -> Bool -> m ()
+> guardE :: MonadError te m => te -> Bool -> m ()
 > guardE e = bool (throwError e) (return ())
 
 Finally, on to the type inference function. We use the `MonadReader`
@@ -44,7 +44,7 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 
 > infer :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m Term
 > infer (Ref n) = nth n <$> ask >>= maybe (throwError (FreeVariable n)) return
-> infer (Def d) = return $ dType d
+> infer (Fun f) = return $ fType f
 > infer (Param p) = absurd p
 > infer (Abs t b) = Prod t <$> extend t (infer b)
 > infer (App f a) = do

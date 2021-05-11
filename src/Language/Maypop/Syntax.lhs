@@ -172,11 +172,11 @@ tie the number of arguments to the types of these arguments.
 With that out of the way, here's our data structure for function
 definitions:
 
-> data Definition = Definition
->     { dName :: String
->     , dArity :: Int
->     , dType :: Term
->     , dBody :: Term
+> data Function = Function
+>     { fName :: String
+>     , fArity :: Int
+>     , fType :: Term
+>     , fBody :: Term
 >     }
 
 One moment, though. What about the parameter names, like `n` from
@@ -187,11 +187,11 @@ It would be good for debugging, of course. In our implementation, though,
 we sidestep this particular issue for now.
 {{< /sidenote >}} to keep track of what variable is named what.
 
-Just like we did with inductive definitions, let's give `Definition`
+Just like we did with inductive definitions, let's give `Function`
 an `Eq` instance based on its name:
 
-> instance Eq Definition where
->     d1 == d2 = dName d1 == dName d2
+> instance Eq Function where
+>     f1 == f2 = fName f1 == fName f2
 
 With the details of definitions out of the way, it's time to describe the terms in our language.
 There's a little trick to the way that we will define them: we'll parameterize
@@ -241,7 +241,7 @@ for the second constructor).
 
 > data ParamTerm a
 >     = Ref Int
->     | Def Definition
+>     | Fun Function
 >     | Param a
 >     | Abs (ParamTerm a) (ParamTerm a)
 >     | App (ParamTerm a) (ParamTerm a)
@@ -449,7 +449,7 @@ And now, the pretty printer itself.
 >     show t = fst $ runState (runReaderT (showM t) []) names
 >         where
 >             showM (Ref i) = nth i <$> ask >>= maybe (return $ "??" ++ show i) return
->             showM (Def d) = return $ dName d
+>             showM (Fun f) = return $ fName f
 >             showM (Param p) = return $ show p
 >             showM (Abs t1 t2) = do
 >                 newName <- popName

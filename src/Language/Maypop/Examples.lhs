@@ -4,6 +4,8 @@ that the code is still operating as expected.
 
 > module Language.Maypop.Examples where
 > import Language.Maypop.Syntax
+> import Language.Maypop.Modules
+> import qualified Data.Map as Map
 
 For convenience, we'll use `p` to referm to the term `Prop`, and `t n` to refer
 to the term `Sort (Type n)`.
@@ -311,3 +313,6 @@ both `Countable`. We can feed them into `count` without providing any additional
 
 This is effectively an abstract data type - we have a value that has only
 one operation (that we can count on): coutning.
+
+> natMod = Module (MkSymbol ["Nat", "Data"])
+>     $ Map.fromList [("ℕ", Definition Public $ Left nat), ("pred", Definition Public $ Right (Function "pred" 1 (Prod (Ind nat) (Ind nat)) pred_))]
