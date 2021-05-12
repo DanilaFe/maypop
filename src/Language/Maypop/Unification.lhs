@@ -207,6 +207,7 @@ data matches, too.
 >             unify' (Ref x1) (Ref x2) | x1 == x2 = return $ Ref x1
 >             unify' (Abs l1 r1) (Abs l2 r2) = liftA2 Abs (unify l1 l2) (unify r1 r2)
 >             unify' (App l1 r1) (App l2 r2) = liftA2 App (unify l1 l2) (unify r1 r2)
+>             unify' (Let l1 r1) (Let l2 r2) = liftA2 Let (unify l1 l2) (unify r1 r2)
 >             unify' (Prod l1 r1) (Prod l2 r2) = liftA2 Prod (unify l1 l2) (unify r1 r2)
 >             unify' (Sort s1) (Sort s2) | s1 == s2 = return $ Sort s1
 >             unify' (Constr ind1 ci1) (Constr ind2 ci2)

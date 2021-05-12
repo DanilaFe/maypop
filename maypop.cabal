@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 8784567f06e288d214c9ecf430377bc1e0d201db64924c8a7f7ce7e392690e0f
+-- hash: 0bacf635e6275bac4e5d0510d325ee886459d6593a61c200eee2c68579eebd58
 
 name:           maypop
 version:        0.1.0.0
@@ -31,6 +31,7 @@ library
       Language.Maypop.Eval
       Language.Maypop.Examples
       Language.Maypop.InfiniteList
+      Language.Maypop.Modules
       Language.Maypop.Syntax
       Language.Maypop.Unification
       Lib

@@ -19,6 +19,9 @@ a function before they are evaluated.
 > eval (App l r) = case eval l of
 >     (Abs _ b) -> eval $ substitute 0 r b
 >     t -> App t (eval r)
+> eval (Let l r) = do
+>     let l' = eval l
+>     eval $ substitute 0 l' r
 > eval (Prod l r) = Prod (eval l) (eval r)
 > eval c@(Case t i _ ts) = fromMaybe c $ do
 >     ((i', ci), xs) <- collectConstrApps (eval t)
