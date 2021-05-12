@@ -53,6 +53,7 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >     if ta == targ
 >      then return (substitute 0 a tb)
 >      else throwError TypeError
+> infer (Let l i) = infer l >>= flip extend (infer i)
 > infer (Prod a b) = extend' a $ \ua -> inferS b >>= \ub -> return $ Sort $
 >     case ub of
 >         Prop -> Prop

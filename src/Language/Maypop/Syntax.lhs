@@ -245,6 +245,7 @@ for the second constructor).
 >     | Param a
 >     | Abs (ParamTerm a) (ParamTerm a)
 >     | App (ParamTerm a) (ParamTerm a)
+>     | Let (ParamTerm a) (ParamTerm a)
 >     | Prod (ParamTerm a) (ParamTerm a)
 >     | Sort Sort
 >     | Constr Inductive Int
@@ -294,6 +295,7 @@ with other possible monadic effects captured by the arbitrary monad `m`:
 >         trans (Ref m) = ask >>= \x -> if m >= x then f m else return (Ref m)
 >         trans (Abs t1 t2) = liftA2 Abs (trans t1) (deepen 1 $ trans t2)
 >         trans (App t1 t2) = liftA2 App (trans t1) (trans t2)
+>         trans (Let t1 t2) = liftA2 Let (trans t1) (deepen 1 $ trans t2)
 >         trans (Prod t1 t2) = liftA2 Prod (trans t1) (deepen 1 $ trans t2)
 >         trans (Case t i tt ts) = do
 >             t' <- trans t
@@ -465,6 +467,11 @@ And now, the pretty printer itself.
 >                 if occurs 0 t2
 >                  then return $ "∀(" ++ newName ++ ":" ++ st1 ++ ")." ++ st2
 >                  else return $ "(" ++ st1 ++ ") → " ++ st2
+>             showM (Let t1 t2) = do
+>                 newName <- popName
+>                 st1 <- showM t1
+>                 st2 <- showM t2
+>                 return $ "let " ++ newName ++ ":" ++ st1 ++ "-> " ++ st2
 >             showM (Sort u) = return $ show u
 >             showM (Constr i ci) = return $ maybe "??" cName $ nth ci (iConstructors i)
 >             showM (Ind i) = return $ iName i
