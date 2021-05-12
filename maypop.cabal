@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 6d2c67423a857d239572c611c6ea0dfa88044627dfc949ad754d2fc029151982
+-- hash: 38b2a967b827344b5fcfd0b59a03a286f095e668fa00c43a4f860a98326d8640
 
 name:           maypop
 version:        0.1.0.0
@@ -33,6 +33,7 @@ library
       Language.Maypop.InfiniteList
       Language.Maypop.Loading
       Language.Maypop.Modules
+      Language.Maypop.Parser
       Language.Maypop.Syntax
       Language.Maypop.Unification
       Lib
@@ -45,6 +46,7 @@ library
     , base >=4.7 && <5
     , containers >=0.6.2.1 && <0.7
     , mtl >=2.2.2 && <3
+    , parsec >=3.1.14.0 && <3.2
   default-language: Haskell2010
 
 executable maypop-exe
@@ -61,6 +63,7 @@ executable maypop-exe
     , containers >=0.6.2.1 && <0.7
     , maypop
     , mtl >=2.2.2 && <3
+    , parsec >=3.1.14.0 && <3.2
   default-language: Haskell2010
 
 test-suite maypop-test
@@ -79,4 +82,5 @@ test-suite maypop-test
     , containers >=0.6.2.1 && <0.7
     , maypop
     , mtl >=2.2.2 && <3
+    , parsec >=3.1.14.0 && <3.2
   default-language: Haskell2010

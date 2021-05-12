@@ -470,8 +470,8 @@ And now, the pretty printer itself.
 >             showM (Let t1 t2) = do
 >                 newName <- popName
 >                 st1 <- showM t1
->                 st2 <- showM t2
->                 return $ "let " ++ newName ++ ":" ++ st1 ++ "-> " ++ st2
+>                 st2 <- extendNames [newName] $ showM t2
+>                 return $ "let " ++ newName ++ " = " ++ st1 ++ " in " ++ st2
 >             showM (Sort u) = return $ show u
 >             showM (Constr i ci) = return $ maybe "??" cName $ nth ci (iConstructors i)
 >             showM (Ind i) = return $ iName i
