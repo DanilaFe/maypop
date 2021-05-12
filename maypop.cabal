@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 1b7aa52f93c0677957f0fec5302d4d1b9fd270f604e76260da878cf92f88e18f
+-- hash: 6d2c67423a857d239572c611c6ea0dfa88044627dfc949ad754d2fc029151982
 
 name:           maypop
 version:        0.1.0.0
@@ -50,6 +50,7 @@ library
 executable maypop-exe
   main-is: Main.hs
   other-modules:
+      Language.Maypop.LoadingImpl
       Paths_maypop
   hs-source-dirs:
       app

@@ -2,11 +2,6 @@ In this module, we'll define how modules are loaded from disk
 and into the interpreter.
 
 > {-# LANGUAGE FlexibleContexts #-}
-> {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-> {-# LANGUAGE ScopedTypeVariables #-}
-> {-# LANGUAGE FlexibleInstances #-}
-> {-# LANGUAGE MultiParamTypeClasses #-}
-> {-# LANGUAGE UndecidableInstances #-}
 > module Language.Maypop.Loading where
 > import Language.Maypop.Syntax
 > import Language.Maypop.Modules
@@ -83,21 +78,6 @@ Let's write a few functions to detect these errors.
 
 With that in hand, let's write our module loading code!
 
-> parseHeader :: String -> String -> Either LoadingError (ModuleHeader, String)
-> parseHeader = error "Parsing is not implemented!"
->
-> parseHeader' :: String -> String -> Either LoadingError ModuleHeader
-> parseHeader' m s = fst <$> parseHeader m s
->
-> parseModule :: GlobalScope -> String -> String -> Either LoadingError (Map.Map String Definition)
-> parseModule = error "Parsing is not implemented!"
->
-> parseModule' :: GlobalScope -> String -> String -> Either LoadingError Module
-> parseModule' gs m s = do 
->     (mh, file') <- parseHeader m s
->     defs <- parseModule gs m file'
->     return $ Module mh defs
-
 > loadModule
 >     :: (MonadError LoadingError m, MonadModule m, MonadModulePath m, MonadReader [Symbol] m)
 >     => Symbol -> m Module
@@ -112,46 +92,3 @@ With that in hand, let's write our module loading code!
 >     gss <- liftEither $ first ImportError $ zipWithM moduleScope is ms
 >     gs <- liftEither $ first ImportError $ foldM mergeScopes emptyScope gss
 >     moduleContent path gs >>= liftEither
-
-> newtype PathT m a = MkPathT { unPathT :: ReaderT [String] m a }
->     deriving (Functor, Applicative, Monad, MonadTrans, MonadError e)
->
-> instance MonadReader r m => MonadReader r (PathT m) where
->     ask = MkPathT $ lift $ ask
->     local r m = MkPathT $ mapReaderT (local r) $ unPathT m
->
-> runPathT :: PathT m a -> [String] -> m a
-> runPathT = runReaderT . unPathT
-
-> instance MonadModule IO where
->     moduleHeader s = handle (\(e :: IOException) -> return $ Left NoSuchFile)
->         $ fmap ((,) s) <$> parseHeader' s <$> readFile s 
->     moduleContent s gs = handle (\(e :: IOException) -> return $ Left NoSuchFile)
->         $ parseModule' gs s <$> readFile s
-
-> instance MonadModule m => MonadModule (ReaderT r m) where
->     moduleHeader s = lift $ moduleHeader s 
->     moduleContent s gs = lift $ moduleContent s gs
->
-> instance MonadModule m => MonadModule (ExceptT e m) where
->     moduleHeader s = lift $ moduleHeader s 
->     moduleContent s gs = lift $ moduleContent s gs
-
-> instance MonadModule m => MonadModule (PathT m) where
->     moduleHeader s = lift $ moduleHeader s 
->     moduleContent s gs = lift $ moduleContent s gs
->
-> instance MonadModulePath m => MonadModulePath (ReaderT r m) where
->     modulePaths s = lift $ modulePaths s
-
-> instance MonadModulePath m => MonadModulePath (ExceptT e m) where
->     modulePaths s = lift $ modulePaths s
->
-> instance Monad m => MonadModulePath (PathT m) where
->     modulePaths s = MkPathT $ asks $ map ((++".mp") . (++symbolFilePath s) . (++"/"))
->
-> symbolFilePath :: Symbol -> String
-> symbolFilePath = intercalate "/" . reverse . symbolPath
->
-> defaultLoadModule :: Symbol -> IO (Either LoadingError Module)
-> defaultLoadModule s = runPathT (runReaderT (runExceptT (loadModule s)) []) ["./stdlib"]
