@@ -8,6 +8,7 @@ In this (Haskell) module, we'll define (Maypop) modules.
 > import Data.List
 > import Data.Maybe
 > import qualified Data.Map as Map
+> import Algebra.Graph.AdjacencyMap
 
 We'll go for a module system similar to that of Haskell. In particular:
 
@@ -85,10 +86,21 @@ the name of a definition, be it a function or an inductive definition.
 
 Finally, let's define a representation for a module:
 
+> data ModuleHeader = ModuleHeader
+>     { mhName :: Symbol
+>     , mhImports :: [(Symbol, ModuleImport)]
+>     }
+
 > data Module = Module
->     { mName :: Symbol
+>     { mHeader :: ModuleHeader
 >     , mDefinitions :: Map.Map String Definition
 >     }
+>
+> mName :: Module -> Symbol
+> mName = mhName . mHeader
+>
+> mImports :: Module -> [(Symbol, ModuleImport)]
+> mImports = mhImports . mHeader
 
 Given such a module, it would be useful to retrieve all the
 definitions that can be exported; we will use this when importing
@@ -230,6 +242,10 @@ These errors are actually why we shouldn't define a `Monoid` instance for `Globa
 the type `a -> a -> a` is not amenable to reporting error messages. Intead, we define
 our own function:
 
+{{< todo >}}Maybe we don't need the combineQualified case here. It's really
+redundant if we externally require that duplicate module names are impossible.
+{{< /todo >}}
+
 > mergeScopes :: GlobalScope -> GlobalScope -> Either ImportError GlobalScope
 > mergeScopes gs1 gs2 = flip GlobalScope unqualified <$> qualified
 >     where
@@ -245,8 +261,14 @@ our own function:
 >                 _ -> throwError DuplicateQualifiedName
 >         sameOriginalMod e1 e2 = eOriginalModule e1 == eOriginalModule e2
 
+As an identity element for `mergeScopes`, let's define `emptyScope`:
+
+> emptyScope :: GlobalScope
+> emptyScope = GlobalScope Map.empty Map.empty
+
 Unqualified names, which may well have duplicates, are combined using `mappend`,
 but deduplicated (to make sure the same definition, when imported twice, doesn't break
 anything). Qualified names, on the other hand, are compared with an `Either`-returning
 function, which produces a "failing" result when two exports originating from differing modules
 are mapped to the same qualified name.
+
