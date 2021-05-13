@@ -32,6 +32,28 @@ What still needs to be done:
 * Tactics to make writing proofs easier
 * Type classes (and automatic search for them)
 
+## Design questions
+
+* We are currently using a very "flattened" representation
+of abstract syntax trees. That is, we don't have references
+to other functions anywhere (other than via DeBrujin indices,
+which refer to parameters of lambda functions). Each `Fun` (function)
+node in our AST literally contains the function it refers to.
+This makes evaluation and typechecking very nice (since we never
+have to look anything else up), but makes parsing a rather nontrivial
+task: we now have to have all other functions in an environment
+while parsing. So we wonder: maybe it's worth using references,
+after all? We would, however, have to bundle an environment for
+all other operations such as evaluation and type checking.
+* How do we define equality on data types? Right now, we use straight
+up names. It may, on one hand, be nice to use the data type's source
+module to ensure equality (otherwise, two moudules defining `Foo` would
+have weird interactions), but then we have to include that information
+with every data type.
+* How do we even do [tactics](https://coq.inria.fr/refman/proof-engine/tactics.html)? Do we define a Haskell API for manpulating
+Maypop ASTs, and write custom tactics in Haskell? Or do we somehow
+extend Maypop with a tactic language? Is there a third option?
+
 ## Running
 The project is built using Stack. Thus, to enter GHCi with
 all of the relevant code, simply run:
