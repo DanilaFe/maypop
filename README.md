@@ -19,9 +19,13 @@ Currently, the Haskell code included can:
 * Pretty print the terms.
 * Check the types of various terms (without type inference).
 * Perform unification (required for type inference).
+* Parse a (currently concrete) syntax for the language
+* Organize code into modules and import required definitions
+* Typecheck modules.
 
 What still needs to be done:
 
+* Recursive data types in the parser. 
 * Type inference (save users the effort of writing types)
 * A module system (to allow imports and abstraction)
 * A prelude of common functions

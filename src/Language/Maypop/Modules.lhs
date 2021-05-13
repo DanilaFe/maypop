@@ -188,6 +188,7 @@ definitions.
 >     = NotExported
 >     | BadOpenImport
 >     | DuplicateQualifiedName
+>     deriving Show
 
 Finally, let's get to the meat of importing a module. Here we will
 once again use the MTL. We'll take advantage of `Either`'s implementation

@@ -110,3 +110,6 @@ load some modules!
 
 > defaultLoadModule :: Symbol -> IO (Either LoadingError Module)
 > defaultLoadModule s = runPathT (runReaderT (runExceptT (loadModule s)) []) ["./stdlib"]
+
+> defaultLoadFile :: String -> IO (Either LoadingError Module)
+> defaultLoadFile s = runPathT (runReaderT (runExceptT (loadFile s)) []) ["./stdlib"]

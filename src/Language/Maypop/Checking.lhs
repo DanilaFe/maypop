@@ -32,6 +32,7 @@ come up.
 >     | NotInductive
 >     | TypeError
 >     | UnknownConstructor
+>     deriving Show
 
 It is also helpful to write a function that ensures a boolean condition
 is met, failing if it isn't. Aside from the condition, we need to

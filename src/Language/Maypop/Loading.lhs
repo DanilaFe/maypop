@@ -61,11 +61,12 @@ name! This is also an error.
 >     | ImportError ImportError
 >     | TypeError TypeError
 >     | ParseError ParseError
+>     deriving Show
 
 Let's write a few functions to detect these errors.
 
-> verifyHeader :: MonadError LoadingError m => Symbol -> ModuleHeader -> m ()
-> verifyHeader s mh = if s == mhName mh then return () else throwError MismatchedName
+> verifyModuleName :: MonadError LoadingError m => Symbol -> ModuleHeader -> m ()
+> verifyModuleName s mh = if s == mhName mh then return () else throwError MismatchedName
 >
 > verifyLoaded :: MonadError LoadingError m => [(String, ModuleHeader)] -> m (String,ModuleHeader)
 > verifyLoaded [] = throwError NoSuchFile
@@ -78,7 +79,11 @@ Let's write a few functions to detect these errors.
 > verifyUniquePaths :: MonadError LoadingError m => [(Symbol, ModuleImport)] -> m ()
 > verifyUniquePaths _ = return () -- TODO
 
-With that in hand, let's write our module loading code!
+With that in hand, let's write our module loading code! Because we want to be
+able to load arbitrary files, too, we split this functionality into `loadModule`
+and `loadFile`. The `loadModule` function actually performs a search of all known
+paths for a particular file, verifies its header, and then hands off the rest of
+the work to `loadFile`.
 
 > loadModule
 >     :: (MonadError LoadingError m, MonadModule m, MonadModulePath m, MonadReader [Symbol] m)
@@ -87,12 +92,29 @@ With that in hand, let's write our module loading code!
 >     verifyCycle s
 >     paths <- modulePaths s
 >     (path, mh) <- rights <$> mapM moduleHeader paths >>= verifyLoaded
->     verifyHeader s mh
+>     verifyModuleName s mh
+>     loadFile path     
+
+The `loadFile` function does the remaining work after `loadModule`: it makes sure
+that the module imports are valid, loads the dependencies from the header (via `mapM .. loadModule`),
+computes the functions they provide (via `moduleScope`), and combines them into a single
+scope `gs` via `mergeScopes`. Because we directly place function and data type references
+into our abstract syntax trees, this `GlobalScope` is required for parsing the actual code
+in the module. We use it to do just that: `moduleContent` is used to parse the module,
+after which we run `checkModule` to verify all the functions in the file are well-typed.
+Once that's done, we return the resulting module.
+
+> loadFile
+>     :: (MonadError LoadingError m, MonadModule m, MonadModulePath m, MonadReader [Symbol] m)
+>     => String -> m Module
+> loadFile path = do
+>     (_, mh) <- moduleHeader path >>= liftEither
 >     verifyUniquePaths (mhImports mh)
 >     let (ss, is) = unzip (mhImports mh)
->     ms <- mapM (local (s:) . loadModule) ss
+>     ms <- mapM (local (mhName mh:) . loadModule) ss
 >     gss <- liftEither $ first ImportError $ zipWithM moduleScope is ms
 >     gs <- liftEither $ first ImportError $ foldM mergeScopes emptyScope gss
 >     m <- moduleContent path gs >>= liftEither
 >     liftEither $ first (Language.Maypop.Loading.TypeError) $ checkModule m
 >     return m
+
