@@ -11,6 +11,7 @@ repetitive.
 > import Text.Parsec
 > import Text.Parsec.Token
 > import Text.Parsec.Char
+> import Text.Parsec.Expr
 > import Text.Parsec.Combinator
 > import qualified Data.Map as Map
 > import Data.Foldable
@@ -43,6 +44,9 @@ repetitive.
 >
 > type Parser a = ParsecT String ParseState (Reader ParseEnv) a
 >
+> opBegin :: Parser Char
+> opBegin = oneOf " -"
+> 
 > genParser :: GenTokenParser String ParseState (Reader ParseEnv)
 > genParser = makeTokenParser $ LanguageDef
 >     { commentStart = "{-"
@@ -51,16 +55,17 @@ repetitive.
 >     , nestedComments = True
 >     , identStart = letter <|> char '_'
 >     , identLetter = alphaNum <|> char '_' <|> char '\''
->     , opStart = oneOf "-"
->     , opLetter = oneOf "->="
+>     , opStart = opBegin
+>     , opLetter = oneOf " ->="
 >     , reservedNames = ["module", "import", "export", "qualified", "as", "data", "where", "forall", "prod", "let", "in", "Prop", "Type", "match", "in", "with", "return", "end"]
->     , reservedOpNames = ["->"]
+>     , reservedOpNames = ["->", " "]
 >     , caseSensitive = True
 >     }
 >
 > ident = identifier genParser
 > sym = symbol genParser
 > kw = reserved genParser
+> op = reservedOp genParser
 > paren = parens genParser
 > nat = fromInteger <$> natural genParser
 >
@@ -222,7 +227,14 @@ repetitive.
 >             t2 <- extend s term
 >             return $ Let t1 t2
 >
-> term = foldl1 App <$> many1 term'
+> opTable :: OperatorTable String ParseState (Reader ParseEnv) Term
+> opTable =
+>     [ [ Infix (do { safeWhite >> pure App }) AssocLeft ]
+>     , [ Infix (do { arrow >> whiteSpace genParser >> pure (\t1 t2 -> Prod t1 (offsetFree 1 t2)) }) AssocRight ]
+>     ]
+>     where safeWhite = whiteSpace genParser *> notFollowedBy opBegin
+>
+> term = buildExpressionParser opTable term'
 >
 > params :: Parser [(String, Term)]
 > params =
