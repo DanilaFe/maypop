@@ -54,6 +54,20 @@ It even has neatly rendered mathematical notation! If the page is down,
 the `Spec.lhs` file in `src/` will include the same information (albeit in
 a less pretty format).
 
+Other that that, we also have a barebones application that loads a Maypop
+file and typechecks it. For instance, you can run:
+
+```
+stack run stdlib/Data/Pair.mp
+```
+
+This will load the file `stdlib/Data/Pair.mp`, and print all the function
+that are defined with it. If the module contains errors, the error will
+be printed instead. You can define your own modules anywhere; however,
+if you import anything in that module file, the interpreter will
+only search the `stdlib` folder. For example, importing `Data.Bool`
+will search `stdlib/Data/Bool.mp`.
+
 ## File Structure
 There are a lot of files here, but there's some order to this chaos.
 Here are the interesting directories:
@@ -63,8 +77,8 @@ where you'll want to look. There, and in the `test/` folder.
 * `test/` contains tests (property based and unit) for the language. It is written
 in Literate Haskell much like the rest of the project, so hopefully the examples
 are somewhat clear.
-* `app/` is the (future) location for the Maypop interpreter. Right now, nothing is
-there; stay tuned!
+* `app/` is the location for the Maypop interpreter. Right now, only a barebones
+file loader is there. Stay tuned!
 * `doc/` contains the various documents we've had to produce for the class.
 * `misc/` includes Haskell files that are not strictly relevant to the language,
 such as experiments.
