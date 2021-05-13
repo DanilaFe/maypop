@@ -58,11 +58,9 @@ define an instance of `MonadModule` for `IO`, that naively looks up and parses a
 Since we don't keep any kind of context between calls to `moduleHeader` and `moduleContent`,
 we'll simply parse the file anew each time.
 
-{{< todo >}} Move into a parsing module! {{< /todo >}}
-
 > parseH :: String -> String -> Either LoadingError (ModuleHeader, String)
 > parseH m s = first (ParseError) $ parseHeader m s
-
+>
 > parseH' :: String -> String -> Either LoadingError ModuleHeader
 > parseH' m s = fst <$> parseH m s
 >
