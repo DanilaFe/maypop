@@ -2,8 +2,8 @@
 
 This is the repository for the Maypop language. Maypop aims
 to be a dependently typed language for verified functional programming.
-In addition, it's written using Literate Haskell, and its source code
-thus contains a quasi-tutorial on how Maypop works. [Check it out!](https://web.engr.oregonstate.edu/~fedorind/CS583/).
+__In addition, it's written using Literate Haskell, and its source code
+thus contains a quasi-tutorial on how Maypop works. [Check it out!](https://web.engr.oregonstate.edu/~fedorind/CS583/).__
 
 The goal isn't necessarily to make something to replace Coq or Agda, but
 to make a language of that sort that is small enough to understand!
