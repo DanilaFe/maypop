@@ -15,10 +15,10 @@ end
 
 -- TODO: Check signature of map
 -- TODO: Maybe write a "porting guide" for types from Haskell/Idris to Maypop
-map : forall (A : Type 0). forall (B: Type 0). forall (l1 : List A). forall (F : forall (x:A). B). List B where
-map t1 t2 t3 t4 l f = match l as x in List _ return List B with
+map : forall (A : Type 0). forall (B: Type 0).forall (f : forall (x:A). B). forall (l : List A). List B where
+map t1 t2 f l = match l as x in List _ return List B with
     | Nil -> Nil
-    | Cons x l2 = Cons (f x) (map l2 f)
+    | Cons x xs = Cons t2 (f x) (map t1 t2 f xs)
     end
 end
 
