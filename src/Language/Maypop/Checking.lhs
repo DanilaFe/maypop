@@ -5,11 +5,14 @@ Let's work on type inference a little.
 > {-# LANGUAGE FlexibleContexts #-}
 > module Language.Maypop.Checking where
 > import Language.Maypop.Syntax
+> import Language.Maypop.Modules
 > import Control.Monad.Reader
 > import Control.Monad.Except
 > import Data.Bifunctor
 > import Data.Bool
 > import Data.Void
+> import Data.Either
+> import qualified Data.Map as Map
 
 First, a little utility function to compute the type of a type. This
 is straight out of the paper on the Calculus of Inductive Constructions.
@@ -29,7 +32,6 @@ come up.
 >     | NotInductive
 >     | TypeError
 >     | UnknownConstructor
->     deriving Show
 
 It is also helpful to write a function that ensures a boolean condition
 is met, failing if it isn't. Aside from the condition, we need to
@@ -86,7 +88,10 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >     return $ substituteMany 0 (t:inds) tt
 >
 > runInfer :: Term -> Either TypeError Term
-> runInfer t = runReader (runExceptT $ infer t) []
+> runInfer = runInfer' []
+
+> runInfer' :: [Term] -> Term -> Either TypeError Term
+> runInfer' ts t = runReader (runExceptT $ infer t) ts
 
 There are a few utility functions in the above definitions; let's take a look
 at all of them in turn.  First up is `inferS`. We need this function because
@@ -172,3 +177,20 @@ a total order, but we do have a join semilattice.
 > joinS (Type i) _ = Type i
 > joinS _ (Type i) = Type i
 
+We should also write some code to perform type checking on entire modules.
+
+> checkFunction :: Function -> Either TypeError Term
+> checkFunction f = do
+>     (ps, bt) <- collectNProd (fArity f) (fType f)
+>     ft <- runInfer' (zipWith offsetFree [1..] (reverse ps)) (fBody f)
+>     guardE TypeError $ ft == bt
+>     return bt
+>     
+>
+> collectNProd :: Int -> Term -> Either TypeError ([Term], Term)
+> collectNProd 0 t = return $ ([], t)
+> collectNProd n (Prod l r) = first (l:) <$> collectNProd (n-1) r
+> collectNProd n _ = throwError NotProduct
+
+> checkModule :: Module -> Either TypeError ()
+> checkModule m = mapM_ checkFunction $ rights $ map dContent $ Map.elems $ mDefinitions m

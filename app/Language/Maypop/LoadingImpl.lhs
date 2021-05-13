@@ -10,10 +10,12 @@ friends.
 > module Language.Maypop.LoadingImpl where
 > import Language.Maypop.Loading
 > import Language.Maypop.Modules
+> import Language.Maypop.Parser
 > import Control.Monad.Reader
 > import Control.Monad.Except
 > import Control.Exception
 > import Data.List
+> import Data.Bifunctor
 > import qualified Data.Map as Map
 
 The easiest thing to start with is the `MonadModulePath` type class.
@@ -58,26 +60,26 @@ we'll simply parse the file anew each time.
 
 {{< todo >}} Move into a parsing module! {{< /todo >}}
 
-> parseHeader :: String -> String -> Either LoadingError (ModuleHeader, String)
-> parseHeader = error "Parsing is not implemented!"
+> parseH :: String -> String -> Either LoadingError (ModuleHeader, String)
+> parseH m s = first (ParseError) $ parseHeader m s
+
+> parseH' :: String -> String -> Either LoadingError ModuleHeader
+> parseH' m s = fst <$> parseH m s
 >
-> parseHeader' :: String -> String -> Either LoadingError ModuleHeader
-> parseHeader' m s = fst <$> parseHeader m s
+> parseM :: ModuleHeader -> GlobalScope -> String -> String -> Either LoadingError (Map.Map String Definition)
+> parseM mh gs m s = first (ParseError) $ parseModule mh gs m s
 >
-> parseModule :: GlobalScope -> String -> String -> Either LoadingError (Map.Map String Definition)
-> parseModule = error "Parsing is not implemented!"
->
-> parseModule' :: GlobalScope -> String -> String -> Either LoadingError Module
-> parseModule' gs m s = do 
->     (mh, file') <- parseHeader m s
->     defs <- parseModule gs m file'
+> parseM' :: GlobalScope -> String -> String -> Either LoadingError Module
+> parseM' gs m s = do 
+>     (mh, file') <- parseH m s
+>     defs <- parseM mh gs m file'
 >     return $ Module mh defs
 
 > instance MonadModule IO where
 >     moduleHeader s = handle (\(e :: IOException) -> return $ Left NoSuchFile)
->         $ fmap ((,) s) <$> parseHeader' s <$> readFile s 
+>         $ fmap ((,) s) <$> parseH' s <$> readFile s
 >     moduleContent s gs = handle (\(e :: IOException) -> return $ Left NoSuchFile)
->         $ parseModule' gs s <$> readFile s
+>         $ parseM' gs s <$> readFile s
 
 The `IO` monad sits at the bottom of a monad transformer stack. However, the `MonadModule`
 constraint needs to be visible at the stack's top; we must therefore once again define how `MonadModule`

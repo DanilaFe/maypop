@@ -1,4 +1,6 @@
 In this module, we'll write a Parsec-based parser for the Maypop language.
+No explanations for now, this is long, subject to change, and kind of
+repetitive.
 
 > module Language.Maypop.Parser where
 > import Prelude hiding (pi)
@@ -11,18 +13,32 @@ In this module, we'll write a Parsec-based parser for the Maypop language.
 > import Text.Parsec.Char
 > import Text.Parsec.Combinator
 > import qualified Data.Map as Map
+> import Data.Foldable
 > import Data.Char
-
+> import Data.Bifunctor
+>
 > data ParseEnv = ParseEnv
 >     { peVars :: Map.Map String Int
+>     , peHeader :: Maybe ModuleHeader
 >     }
 > 
 > extendEnv :: String -> ParseEnv -> ParseEnv
 > extendEnv s e = e { peVars = Map.insert s 0 $ Map.map (+1) $ peVars e }
-
+>
+> extend :: String -> Parser a -> Parser a
+> extend = local . extendEnv
+>
+> extendMany :: [String] -> Parser a -> Parser a
+> extendMany ss e = foldr extend e ss
+>
+> requireHeader :: Parser ModuleHeader
+> requireHeader = asks peHeader >>= maybe (fail "Header required but not yet processed!") return
+>
+> requireModuleName :: Parser Symbol
+> requireModuleName = mhName <$> requireHeader
+>
 > data ParseState = ParseState
->     { psDefs :: Map.Map String Definition
->     , psScope :: GlobalScope
+>     { psScope :: GlobalScope
 >     }
 >
 > type Parser a = ParsecT String ParseState (Reader ParseEnv) a
@@ -37,7 +53,7 @@ In this module, we'll write a Parsec-based parser for the Maypop language.
 >     , identLetter = alphaNum <|> char '_' <|> char '\''
 >     , opStart = oneOf "-"
 >     , opLetter = oneOf "->="
->     , reservedNames = ["module", "import", "export", "qualified", "as", "data", "where", "forall", "prod", "let", "in", "Prop", "Type", "case", "of"]
+>     , reservedNames = ["module", "import", "export", "qualified", "as", "data", "where", "forall", "prod", "let", "in", "Prop", "Type", "match", "in", "with", "return", "end"]
 >     , reservedOpNames = ["->"]
 >     , caseSensitive = True
 >     }
@@ -71,7 +87,7 @@ In this module, we'll write a Parsec-based parser for the Maypop language.
 > importIdent = liftA2 (,) ident importType
 >
 > importIdents :: Parser (Map.Map String ImportType)
-> importIdents = Map.fromList <$> paren (sepBy1 importIdent (comma genParser))
+> importIdents = Map.fromList <$> paren (sepBy importIdent (comma genParser))
 >
 > qualified :: Parser Qualified
 > qualified = maybe NotQualified (const Qualified) <$> optionMaybe (kw "qualified")
@@ -90,7 +106,7 @@ In this module, we'll write a Parsec-based parser for the Maypop language.
 > 
 > module_ :: Parser Symbol
 > module_ = kw "module" >> modulePath
-
+>
 > header :: Parser ModuleHeader
 > header = liftA2 ModuleHeader module_ (many import_)
 >
@@ -107,7 +123,7 @@ In this module, we'll write a Parsec-based parser for the Maypop language.
 > prod = forall <|> pi
 >
 > param :: Parser (String, Term)
-> param = pure (,) <*> ident <* sym ":" <*> term
+> param = paren $ pure (,) <*> ident <* sym ":" <*> term
 >
 > prop :: Parser Sort
 > prop = kw "Prop" >> return Prop
@@ -141,15 +157,58 @@ In this module, we'll write a Parsec-based parser for the Maypop language.
 >             exportRef <- Map.lookup (unqualName s) . sUnqualified . psScope <$> getState
 >             maybe (fail $ "Undefined reference: " ++ s) resolveUnqual exportRef
 >
+> arrow :: Parser ()
+> arrow = void $ sym "->" <|> sym "→"
+>
+> caseBranch :: Parser (String, Term)
+> caseBranch = do
+>     sym "|"
+>     constr <- upperIdent
+>     params <- many ident
+>     arrow
+>     t <- extendMany params term
+>     return (constr, t)
+>
+> inductiveRef :: Parser (Inductive, [String])
+> inductiveRef = do
+>     ref <- try qualRef <|> unqualRef
+>     case ref of
+>         Ind i -> do
+>              sym "_"
+>              ps <- many ident
+>              if length ps == length (iArity i)
+>               then return (i, ps)
+>               else fail "Incorrect inductive arity!"
+>         _ -> fail "Not an inductive data type!"
+>
+> toCaseBranches :: Inductive -> [(String, Term)] -> Parser [Term]
+> toCaseBranches i bs = do
+>     mapM (\c -> maybe (fail $ "Missing branch " ++ (cName c) ++ " from " ++ show (map fst bs)) return $ (`lookup` bs) $ cName c) (iConstructors i)
+>
+> case_ :: Parser Term
+> case_ = do
+>     kw "match"
+>     t <- term
+>     kw "as"
+>     as <- ident
+>     kw "in"
+>     (i, ps) <- inductiveRef
+>     kw "return"
+>     tt <- extendMany (as:ps) term 
+>     kw "with"
+>     bs <- many caseBranch >>= toCaseBranches i
+>     kw "end"
+>     return $ Case t i tt bs
+>
 > term' :: Parser Term
-> term' = sort <|> prodT <|> abs <|> let_ <|> ref <|> paren term
+> term' = sort <|> prodT <|> abs <|> let_ <|> ref <|> case_ <|> paren term
 >     where
 >         sort = Sort <$> (prop <|> type_)
 >         gen k f = do
 >             k
 >             (s, t1) <- param
 >             dot genParser
->             t2 <- local (extendEnv s) term
+>             t2 <- extend s term
 >             return $ f t1 t2
 >         prodT = gen prod Prod
 >         abs = gen lambda Abs
@@ -160,10 +219,92 @@ In this module, we'll write a Parsec-based parser for the Maypop language.
 >             sym "="
 >             t1 <- term
 >             kw "in"
->             t2 <- local (extendEnv s) term
+>             t2 <- extend s term
 >             return $ Let t1 t2
 >
 > term = foldl1 App <$> many1 term'
 >
-> run :: Parser a -> String -> Either ParseError a
-> run p s = runReader (runPT p (ParseState Map.empty emptyScope) "<test>" s) (ParseEnv Map.empty)
+> params :: Parser [(String, Term)]
+> params =
+>     do
+>         (s, t) <- param
+>         ps <- extend s params
+>         return $ (s,t):ps
+>     <|> return []
+>
+> collectArity :: Term -> Parser ([Term], Sort)
+> collectArity (Prod l r) = first (l:) <$> collectArity r
+> collectArity (Sort s) = return ([], s)
+> collectArity _ = fail "Invalid arity declaration!"
+>
+> indBranch :: String -> Int -> Parser Constructor
+> indBranch ind ar = do
+>     sym "|"
+>     cname <- ident
+>     (xs, ps) <- unzip <$> params
+>     sym ":"
+>     name <- ident
+>     indices <- many $ extendMany xs term'
+>     if name /= ind || ar /= length indices
+>      then fail "Invalid constructor return!"
+>      else return $ Constructor ps indices cname
+>
+> registerExport :: String -> ExportVariant -> Parser ()
+> registerExport s ev = do
+>     mn <- requireModuleName
+>     let e = Export ev mn
+>     let gs' = GlobalScope (Map.singleton (qualName mn s) e) (Map.singleton (unqualName s) [e])
+>     gs <- psScope <$> getState
+>     case mergeScopes gs gs' of
+>         Right gs'' -> modifyState (\s -> s { psScope = gs'' })
+>         Left _ -> fail $ "Duplicate name: " ++ s
+>
+> registerInd :: Inductive -> Parser ()
+> registerInd i = do
+>     registerExport (iName i) (IndExport i)
+>     zipWithM_ (\ci c -> registerExport (cName c) (ConExport i ci)) [0..] (iConstructors i)
+>
+> inductive :: Parser Inductive
+> inductive = do
+>     kw "data"
+>     name <- ident
+>     (xs, ps) <- unzip <$> params
+>     sym ":"
+>     (ar, s) <- extendMany xs term >>= collectArity
+>     kw "where"
+>     cs <- many (extendMany xs $ indBranch name (length ar))
+>     kw "end"
+>     let ind = Inductive ps ar s cs name
+>     registerInd ind
+>     return ind
+>
+> function :: Parser Function
+> function = do
+>    name <- ident
+>    sym ":"
+>    t <- term
+>    kw "where"
+>    sym name
+>    ps <- many ident
+>    sym "="
+>    bt <- extendMany ps term
+>    kw "end"
+>    let fun = Function name (length ps) t bt
+>    registerExport name (FunExport $ fun)
+>    return fun
+>
+> definition :: Parser Definition
+> definition = Definition Public <$> (Left <$> inductive <|> Right <$> function)
+>
+> definitionMap :: Parser (Map.Map String Definition)
+> definitionMap = do
+>     defs <- many definition
+>     return $ Map.fromList $ map (\d -> (dName d, d)) defs
+>
+> parseHeader :: String -> String -> Either ParseError (ModuleHeader, String)
+> parseHeader file s = runReader (runPT initialParser (ParseState emptyScope) file s) (ParseEnv Map.empty Nothing)
+>     where
+>         initialParser = liftA2 (,) header (many anyToken)
+>
+> parseModule :: ModuleHeader -> GlobalScope -> String -> String -> Either ParseError (Map.Map String Definition)
+> parseModule mh gs file s = runReader (runPT definitionMap (ParseState gs) file s) (ParseEnv Map.empty (Just mh))

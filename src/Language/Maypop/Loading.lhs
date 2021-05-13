@@ -14,6 +14,7 @@ and into the interpreter.
 > import Data.Bifunctor
 > import Data.Either
 > import Data.List
+> import Text.Parsec
 > import qualified Data.Map as Map
 
 Now that we know what constitutes a module, we should try get a mechanism
@@ -59,6 +60,7 @@ name! This is also an error.
 >     | Cycle
 >     | ImportError ImportError
 >     | TypeError TypeError
+>     | ParseError ParseError
 
 Let's write a few functions to detect these errors.
 
@@ -91,4 +93,6 @@ With that in hand, let's write our module loading code!
 >     ms <- mapM (local (s:) . loadModule) ss
 >     gss <- liftEither $ first ImportError $ zipWithM moduleScope is ms
 >     gs <- liftEither $ first ImportError $ foldM mergeScopes emptyScope gss
->     moduleContent path gs >>= liftEither
+>     m <- moduleContent path gs >>= liftEither
+>     liftEither $ first (Language.Maypop.Loading.TypeError) $ checkModule m
+>     return m
