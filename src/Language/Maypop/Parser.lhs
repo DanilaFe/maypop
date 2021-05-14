@@ -86,9 +86,9 @@ repetitive.
 >     , identStart = letter <|> char '_'
 >     , identLetter = alphaNum <|> char '_' <|> char '\''
 >     , opStart = opBegin
->     , opLetter = oneOf " ->=→"
+>     , opLetter = oneOf " ->="
 >     , reservedNames = ["module", "import", "export", "qualified", "as", "data", "where", "forall", "prod", "let", "in", "Prop", "Type", "match", "in", "with", "return", "end"]
->     , reservedOpNames = ["->", "→", " "]
+>     , reservedOpNames = ["->", " "]
 >     , caseSensitive = True
 >     }
 >
@@ -176,7 +176,7 @@ repetitive.
 > ref = try qualRef <|> unqualRef
 >
 > arrow :: Parser ()
-> arrow = void $ op "->" <|> op "→"
+> arrow = void $ sym "->"
 >
 > caseBranch :: Parser ParseBranch
 > caseBranch = pure (,,) <* sym "|" <*> upperIdent <*> many ident <* arrow <*> term
