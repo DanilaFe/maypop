@@ -39,4 +39,4 @@ replace t P x y eq Px =
     match eq as e in Eq _ z return P z with
     | Refl -> Px
     end
-end.
+end

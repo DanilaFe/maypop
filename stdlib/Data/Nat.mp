@@ -5,10 +5,10 @@ data Nat : Type 0 where
 | S (n : Nat) : Nat
 end
 
-plus : Nat ->Nat ->Nat where
+plus : Nat -> Nat -> Nat where
 plus n m =
     match n as x in Nat _ return Nat with
-    | O ->m
-    | S nn ->S m
+    | O -> m
+    | S nn -> S (plus nn m)
     end
 end

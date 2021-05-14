@@ -1,5 +1,5 @@
 module Basics
 
-id : forall (t : Type 0). forall (x : t). t where
+id : forall (a : Type 0). a -> a where
 id t x = x
 end
