@@ -64,20 +64,14 @@ we'll simply parse the file anew each time.
 > parseH' :: String -> String -> Either LoadingError ModuleHeader
 > parseH' m s = fst <$> parseH m s
 >
-> parseM :: ModuleHeader -> GlobalScope -> String -> String -> Either LoadingError (Map.Map String Definition)
-> parseM mh gs m s = first (ParseError) $ parseModule mh gs m s
->
-> parseM' :: GlobalScope -> String -> String -> Either LoadingError Module
-> parseM' gs m s = do 
->     (mh, file') <- parseH m s
->     defs <- parseM mh gs m file'
->     return $ Module mh defs
+> parseD :: String -> String -> Either LoadingError [(String, ParseDef)]
+> parseD m s = first (ParseError) $ parseDefs m s
 
 > instance MonadModule IO where
 >     moduleHeader s = handle (\(e :: IOException) -> return $ Left NoSuchFile)
 >         $ fmap ((,) s) <$> parseH' s <$> readFile s
->     moduleContent s gs = handle (\(e :: IOException) -> return $ Left NoSuchFile)
->         $ parseM' gs s <$> readFile s
+>     moduleContent s = handle (\(e :: IOException) -> return $ Left NoSuchFile)
+>         $ parseD s <$> readFile s
 
 The `IO` monad sits at the bottom of a monad transformer stack. However, the `MonadModule`
 constraint needs to be visible at the stack's top; we must therefore once again define how `MonadModule`
@@ -86,15 +80,15 @@ are exceptionally mechanical; all we do is lift the underlying monad's implement
 
 > instance MonadModule m => MonadModule (ReaderT r m) where
 >     moduleHeader s = lift $ moduleHeader s 
->     moduleContent s gs = lift $ moduleContent s gs
+>     moduleContent s = lift $ moduleContent s
 >
 > instance MonadModule m => MonadModule (ExceptT e m) where
 >     moduleHeader s = lift $ moduleHeader s 
->     moduleContent s gs = lift $ moduleContent s gs
+>     moduleContent s = lift $ moduleContent s
 
 > instance MonadModule m => MonadModule (PathT m) where
 >     moduleHeader s = lift $ moduleHeader s 
->     moduleContent s gs = lift $ moduleContent s gs
+>     moduleContent s = lift $ moduleContent s
 
 Finally, let's write some functions to make use of all this machinery.
 Since we have commited to using the Linux file separator for our paths,
