@@ -187,7 +187,6 @@ We should also write some code to perform type checking on entire modules.
 >     ft <- runInfer' (zipWith offsetFree [1..] (reverse ps)) (fBody f)
 >     guardE TypeError $ ft == bt
 >     return bt
->     
 >
 > collectNProd :: Int -> Term -> Either TypeError ([Term], Term)
 > collectNProd 0 t = return $ ([], t)

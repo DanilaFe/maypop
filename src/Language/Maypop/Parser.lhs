@@ -2,12 +2,21 @@ In this module, we'll write a Parsec-based parser for the Maypop language.
 No explanations for now, this is long, subject to change, and kind of
 repetitive.
 
+> {-# LANGUAGE TupleSections #-}
+> {-# LANGUAGE FlexibleContexts #-}
+> {-# LANGUAGE FlexibleInstances #-}
+> {-# LANGUAGE UndecidableInstances #-}
+> {-# LANGUAGE MonoLocalBinds #-}
+> {-# LANGUAGE RecursiveDo #-}
 > module Language.Maypop.Parser where
 > import Prelude hiding (pi)
-> import Language.Maypop.Syntax
+> import Language.Maypop.Syntax hiding (ParamTerm(..), Term)
+> import qualified Language.Maypop.Syntax as S
 > import Language.Maypop.Modules
 > import Control.Applicative hiding ((<|>), many)
 > import Control.Monad.Reader
+> import Control.Monad.State
+> import Control.Monad.Except
 > import Text.Parsec
 > import Text.Parsec.Token
 > import Text.Parsec.Char
@@ -17,37 +26,58 @@ repetitive.
 > import Data.Foldable
 > import Data.Char
 > import Data.Bifunctor
+> import Data.List
+> import Data.Maybe
+> import Data.Functor.Identity
+> import Debug.Trace
 >
-> data ParseEnv = ParseEnv
->     { peVars :: Map.Map String Int
->     , peHeader :: Maybe ModuleHeader
+>
+> data ParseRef = SymRef Symbol | StrRef String
+>
+> type ParseParam = (String, ParseTerm)
+>
+> data ParseTerm
+>     = Ref ParseRef
+>     | Abs ParseParam ParseTerm
+>     | App ParseTerm ParseTerm
+>     | Let ParseParam ParseTerm
+>     | Prod ParseParam ParseTerm
+>     | Sort Sort
+>     | Case ParseTerm String ParseIndRef ParseTerm [ParseBranch]
+>
+> data ParseConstr = ParseConstr
+>     { pcName :: String
+>     , pcParams :: [ParseParam]
+>     , pcIndices :: [ParseTerm]
 >     }
-> 
-> extendEnv :: String -> ParseEnv -> ParseEnv
-> extendEnv s e = e { peVars = Map.insert s 0 $ Map.map (+1) $ peVars e }
 >
-> extend :: String -> Parser a -> Parser a
-> extend = local . extendEnv
->
-> extendMany :: [String] -> Parser a -> Parser a
-> extendMany ss e = foldr extend e ss
->
-> requireHeader :: Parser ModuleHeader
-> requireHeader = asks peHeader >>= maybe (fail "Header required but not yet processed!") return
->
-> requireModuleName :: Parser Symbol
-> requireModuleName = mhName <$> requireHeader
->
-> data ParseState = ParseState
->     { psScope :: GlobalScope
+> data ParseInd = ParseInd
+>     { piName :: String
+>     , piParams :: [ParseParam] 
+>     , piArity :: [ParseParam]
+>     , piSort :: Sort
+>     , piConstructors :: [ParseConstr]
 >     }
 >
-> type Parser a = ParsecT String ParseState (Reader ParseEnv) a
+> data ParseFun = ParseFun
+>     { pfName :: String
+>     , pfArity :: [String]
+>     , pfType :: ParseTerm
+>     , pfBody :: ParseTerm
+>     }
+>
+> type ParseDef = Either ParseInd ParseFun
+>
+> type ParseBranch = (String, [String], ParseTerm)
+>
+> type ParseIndRef = (ParseRef, [String])
+>
+> type Parser a = Parsec String () a
 >
 > opBegin :: Parser Char
 > opBegin = oneOf " -"
 > 
-> genParser :: GenTokenParser String ParseState (Reader ParseEnv)
+> genParser :: GenTokenParser String () Identity
 > genParser = makeTokenParser $ LanguageDef
 >     { commentStart = "{-"
 >     , commentEnd = "-}"
@@ -56,9 +86,9 @@ repetitive.
 >     , identStart = letter <|> char '_'
 >     , identLetter = alphaNum <|> char '_' <|> char '\''
 >     , opStart = opBegin
->     , opLetter = oneOf " ->="
+>     , opLetter = oneOf " ->=→"
 >     , reservedNames = ["module", "import", "export", "qualified", "as", "data", "where", "forall", "prod", "let", "in", "Prop", "Type", "match", "in", "with", "return", "end"]
->     , reservedOpNames = ["->", " "]
+>     , reservedOpNames = ["->", "→", " "]
 >     , caseSensitive = True
 >     }
 >
@@ -127,7 +157,7 @@ repetitive.
 > prod :: Parser ()
 > prod = forall <|> pi
 >
-> param :: Parser (String, Term)
+> param :: Parser ParseParam
 > param = paren $ pure (,) <*> ident <* sym ":" <*> term
 >
 > prop :: Parser Sort
@@ -136,161 +166,77 @@ repetitive.
 > type_ :: Parser Sort
 > type_ = pure Type <* kw "Type" <*> nat
 >
-> fromExport :: ExportVariant -> Term
-> fromExport (IndExport i) = Ind i
-> fromExport (ConExport i ci) = Constr i ci
-> fromExport (FunExport f) = Fun f
-> 
-> qualRef :: Parser Term
-> qualRef = do
->     s <- qlName
->     exportRef <- Map.lookup s . sQualified . psScope <$> getState
->     maybe (fail $ "Undefined reference: " ++ show s) (return . fromExport . eVariant) exportRef
+> qualRef :: Parser ParseRef
+> qualRef = SymRef <$> qlName
 >
-> resolveUnqual :: [Export] -> Parser Term
-> resolveUnqual [] = fail "No matching definitions!"
-> resolveUnqual [x] = return $ fromExport $ eVariant x
-> resolveUnqual xs = fail $ "Ambigous reference: could be one of " ++ show (map eOriginalModule xs)
+> unqualRef :: Parser ParseRef
+> unqualRef = StrRef <$> ident
 >
-> unqualRef :: Parser Term
-> unqualRef = do
->     s <- ident
->     localRef <- asks (Map.lookup s . peVars)
->     case localRef of
->         Just i -> return $ Ref i
->         Nothing -> do
->             exportRef <- Map.lookup (unqualName s) . sUnqualified . psScope <$> getState
->             maybe (fail $ "Undefined reference: " ++ s) resolveUnqual exportRef
+> ref :: Parser ParseRef
+> ref = try qualRef <|> unqualRef
 >
 > arrow :: Parser ()
-> arrow = void $ sym "->" <|> sym "→"
+> arrow = void $ op "->" <|> op "→"
 >
-> caseBranch :: Parser (String, Term)
-> caseBranch = do
->     sym "|"
->     constr <- upperIdent
->     params <- many ident
->     arrow
->     t <- extendMany params term
->     return (constr, t)
+> caseBranch :: Parser ParseBranch
+> caseBranch = pure (,,) <* sym "|" <*> upperIdent <*> many ident <* arrow <*> term
 >
-> inductiveRef :: Parser (Inductive, [String])
-> inductiveRef = do
->     ref <- try qualRef <|> unqualRef
->     case ref of
->         Ind i -> do
->              sym "_"
->              ps <- many ident
->              if length ps == length (iArity i)
->               then return (i, ps)
->               else fail "Incorrect inductive arity!"
->         _ -> fail "Not an inductive data type!"
+> inductiveRef :: Parser ParseIndRef
+> inductiveRef = pure (,) <*> ref <* sym "_" <*> many ident
 >
-> toCaseBranches :: Inductive -> [(String, Term)] -> Parser [Term]
-> toCaseBranches i bs = do
->     mapM (\c -> maybe (fail $ "Missing branch " ++ (cName c) ++ " from " ++ show (map fst bs)) return $ (`lookup` bs) $ cName c) (iConstructors i)
+> case_ :: Parser ParseTerm
+> case_ = pure Case
+>     <* kw "match" <*> term
+>     <* kw "as" <*> ident
+>     <* kw "in" <*> inductiveRef
+>     <* kw "return" <*> term
+>     <* kw "with" <*> many caseBranch
+>     <* kw "end"
 >
-> case_ :: Parser Term
-> case_ = do
->     kw "match"
->     t <- term
->     kw "as"
->     as <- ident
->     kw "in"
->     (i, ps) <- inductiveRef
->     kw "return"
->     tt <- extendMany (as:ps) term 
->     kw "with"
->     bs <- many caseBranch >>= toCaseBranches i
->     kw "end"
->     return $ Case t i tt bs
->
-> term' :: Parser Term
-> term' = sort <|> prodT <|> abs <|> let_ <|> ref <|> case_ <|> paren term
+> term' :: Parser ParseTerm
+> term' = sort <|> prodT <|> abs <|> let_ <|> (Ref <$> ref) <|> case_ <|> paren term
 >     where
 >         sort = Sort <$> (prop <|> type_)
->         gen k f = do
->             k
->             (s, t1) <- param
->             dot genParser
->             t2 <- extend s term
->             return $ f t1 t2
+>         gen k f = pure f <* k <*> param <* dot genParser <*> term
 >         prodT = gen prod Prod
 >         abs = gen lambda Abs
->         ref = unqualRef <|> qualRef
->         let_ = do
->             kw "let"
->             s <- ident
->             sym "="
->             t1 <- term
->             kw "in"
->             t2 <- extend s term
->             return $ Let t1 t2
+>         let_ = pure (curry Let) <* kw "let" <*> ident <* sym "=" <*> term <* kw "in" <*> term
 >
-> opTable :: OperatorTable String ParseState (Reader ParseEnv) Term
+> opTable :: OperatorTable String () Identity ParseTerm
 > opTable =
 >     [ [ Infix (do { safeWhite >> pure App }) AssocLeft ]
->     , [ Infix (do { arrow >> whiteSpace genParser >> pure (\t1 t2 -> Prod t1 (offsetFree 1 t2)) }) AssocRight ]
+>     , [ Infix (do { arrow >> whiteSpace genParser >> pure (Prod . ("_",)) }) AssocRight ]
 >     ]
 >     where safeWhite = whiteSpace genParser *> notFollowedBy opBegin
 >
 > term = buildExpressionParser opTable term'
 >
-> params :: Parser [(String, Term)]
-> params =
->     do
->         (s, t) <- param
->         ps <- extend s params
->         return $ (s,t):ps
->     <|> return []
+> params :: Parser [ParseParam]
+> params = many param
 >
-> collectArity :: Term -> Parser ([Term], Sort)
+> collectArity :: ParseTerm -> Parser ([ParseParam], Sort)
 > collectArity (Prod l r) = first (l:) <$> collectArity r
 > collectArity (Sort s) = return ([], s)
 > collectArity _ = fail "Invalid arity declaration!"
 >
-> indBranch :: String -> Int -> Parser Constructor
-> indBranch ind ar = do
->     sym "|"
->     cname <- ident
->     (xs, ps) <- unzip <$> params
->     sym ":"
->     name <- ident
->     indices <- many $ extendMany xs term'
->     if name /= ind || ar /= length indices
->      then fail "Invalid constructor return!"
->      else return $ Constructor ps indices cname
+> indBranch :: String -> Parser ParseConstr
+> indBranch i = pure ParseConstr
+>     <* sym "|" <*> ident <*> params
+>     <* sym ":" <* sym i <*> many term'
 >
-> registerExport :: String -> ExportVariant -> Parser ()
-> registerExport s ev = do
->     mn <- requireModuleName
->     let e = Export ev mn
->     let gs' = GlobalScope (Map.singleton (qualName mn s) e) (Map.singleton (unqualName s) [e])
->     gs <- psScope <$> getState
->     case mergeScopes gs gs' of
->         Right gs'' -> modifyState (\s -> s { psScope = gs'' })
->         Left _ -> fail $ "Duplicate name: " ++ s
->
-> registerInd :: Inductive -> Parser ()
-> registerInd i = do
->     registerExport (iName i) (IndExport i)
->     zipWithM_ (\ci c -> registerExport (cName c) (ConExport i ci)) [0..] (iConstructors i)
->
-> inductive :: Parser Inductive
+> inductive :: Parser (String, ParseInd)
 > inductive = do
 >     kw "data"
 >     name <- ident
->     (xs, ps) <- unzip <$> params
+>     ps <- params
 >     sym ":"
->     (ar, s) <- extendMany xs term >>= collectArity
+>     (ar, s) <- term >>= collectArity
 >     kw "where"
->     cs <- many (extendMany xs $ indBranch name (length ar))
+>     cs <- many (indBranch name)
 >     kw "end"
->     let ind = Inductive ps ar s cs name
->     registerInd ind
->     return ind
+>     return $ (name, ParseInd name ps ar s cs)
 >
-> function :: Parser Function
+> function :: Parser (String, ParseFun)
 > function = do
 >    name <- ident
 >    sym ":"
@@ -299,24 +245,173 @@ repetitive.
 >    sym name
 >    ps <- many ident
 >    sym "="
->    bt <- extendMany ps term
+>    bt <- term
 >    kw "end"
->    let fun = Function name (length ps) t bt
->    registerExport name (FunExport $ fun)
->    return fun
+>    return $ (name, ParseFun name ps t bt)
 >
-> definition :: Parser Definition
-> definition = Definition Public <$> (Left <$> inductive <|> Right <$> function)
->
-> definitionMap :: Parser (Map.Map String Definition)
-> definitionMap = do
->     defs <- many definition
->     return $ Map.fromList $ map (\d -> (dName d, d)) defs
+> definition :: Parser (String, ParseDef)
+> definition = (second Left <$> inductive) <|> (second Right <$> function)
 >
 > parseHeader :: String -> String -> Either ParseError (ModuleHeader, String)
-> parseHeader file s = runReader (runPT initialParser (ParseState emptyScope) file s) (ParseEnv Map.empty Nothing)
->     where
->         initialParser = liftA2 (,) header (many anyToken)
+> parseHeader = runP (liftA2 (,) header (many anyToken)) ()
 >
-> parseModule :: ModuleHeader -> GlobalScope -> String -> String -> Either ParseError (Map.Map String Definition)
-> parseModule mh gs file s = runReader (runPT definitionMap (ParseState gs) file s) (ParseEnv Map.empty (Just mh))
+> parseDefs :: String -> String -> Either ParseError [(String, ParseDef)]
+> parseDefs = runP (header *> many definition <* eof) ()
+>
+> data ResolveEnv = ResolveEnv
+>     { reVars :: [String]
+>     , reHeader :: ModuleHeader
+>     }
+>
+> withVar :: MonadReader ResolveEnv m => String -> m a -> m a
+> withVar s = local (\re -> re { reVars = s : reVars re })
+>
+> withVars :: MonadReader ResolveEnv m => [String] -> m a -> m a
+> withVars xs m = foldr withVar m xs
+>
+> currentModule :: MonadReader ResolveEnv m => m Symbol
+> currentModule = asks (mhName . reHeader)
+>
+> lookupVar :: MonadReader ResolveEnv m => String -> m (Maybe Int)
+> lookupVar s = asks (elemIndex s . reVars)
+>
+> data ResolveState = ResolveState
+>     { rsScope :: GlobalScope
+>     , rsDefs :: Map.Map String Definition
+>     }
+>
+> class (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ImportError m, MonadFix m)
+>     => MonadResolver m where
+>
+> instance (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ImportError m, MonadFix m)
+>     => MonadResolver m where
+> 
+> emitExport :: MonadResolver m => String -> ExportVariant -> m ()
+> emitExport s ev = do
+>     mn <- currentModule
+>     let export = Export ev mn
+>     let nQual = Map.singleton (qualName mn s) export
+>     let nUnqual = Map.singleton (unqualName s) [export]
+>     let ngs = GlobalScope nQual nUnqual
+>     gs' <- gets ((`mergeScopes` ngs) . rsScope) >>= liftEither
+>     modify $ \rs -> rs { rsScope = gs' }
+>
+> emitInd :: MonadResolver m => String -> Inductive -> m ()
+> emitInd s i = emitExport s (IndExport i)
+>
+> emitFun :: MonadResolver m => String -> Function -> m ()
+> emitFun s f = emitExport s (FunExport f)
+>
+> emitDef :: MonadResolver m => String -> Definition -> m ()
+> emitDef s d = modify $ \rs -> rs { rsDefs = Map.insert s d $ rsDefs rs }
+>
+> emitConstructors :: MonadResolver m => Inductive -> m ()
+> emitConstructors i = zipWithM_ emitConstructor [0..] (iConstructors i)
+>     where emitConstructor ci c = emitExport (cName c) (ConExport i ci)
+>
+> exportToTerm :: Export -> S.Term
+> exportToTerm e = case eVariant e of
+>     FunExport f -> S.Fun f
+>     ConExport i ci -> S.Constr i ci
+>     IndExport i -> S.Ind i
+> 
+> narrowExports :: MonadResolver m => [Export] -> m Export
+> narrowExports [] = throwError (error "unknown ref")
+> narrowExports [x] = return x
+> narrowExports xs = throwError (error "ambigous ref")
+>
+> lookupUnqual :: MonadResolver m => String -> m S.Term
+> lookupUnqual s = do
+>     es <- gets (fromMaybe [] . Map.lookup (unqualName s) . sUnqualified . rsScope)
+>     exportToTerm <$> narrowExports es
+>
+> lookupQual :: MonadResolver m => Symbol -> m S.Term
+> lookupQual s = do
+>     me <- gets (Map.lookup s . sQualified . rsScope)
+>     maybe (throwError (error "unknown qual ref")) (return . exportToTerm) me
+>
+> lookupRef :: MonadResolver m => ParseRef -> m S.Term
+> lookupRef (SymRef s) = lookupQual s
+> lookupRef (StrRef s) = lookupUnqual s
+>
+> lookupInd :: MonadResolver m => ParseRef -> m S.Inductive
+> lookupInd r = do
+>     t <- lookupRef r
+>     case t of
+>         S.Ind i -> return i
+>         _ -> throwError (error "not ind") -- TODO not the right error
+>
+> resolveIndRef :: MonadResolver m => ParseIndRef -> m (S.Inductive, [String])
+> resolveIndRef (r, is) = do
+>     i <- lookupInd r
+>     if length (iArity i) == length is
+>      then return (i, is)
+>      else throwError (error "invalid arity") -- TODO not the right error either
+>
+> resolveBranch :: MonadResolver m => ParseBranch -> m (String, S.Term)
+> resolveBranch (s, ps, t) = (,) s <$> withVars ps (resolveTerm t)
+>
+> matchBranch :: MonadResolver m => [(String, S.Term)] -> Constructor -> m S.Term
+> matchBranch bs c = maybe (throwError (error "missing constructor")) return $ lookup (cName c) bs 
+>
+> resolveTerm :: MonadResolver m => ParseTerm -> m S.Term
+> resolveTerm (Ref (StrRef s)) = do
+>     vref <- lookupVar s
+>     case vref of
+>         Just i -> return $ (S.Ref i)
+>         Nothing -> lookupUnqual s
+> resolveTerm (Ref (SymRef s)) = lookupQual s
+> resolveTerm (Abs (x, tt) t) = liftA2 S.Abs (resolveTerm tt) (withVar x $ resolveTerm t)
+> resolveTerm (App l r) = liftA2 S.App (resolveTerm l) (resolveTerm r)
+> resolveTerm (Let (x, t) ti) = liftA2 S.Let (resolveTerm t) (withVar x $ resolveTerm ti)
+> resolveTerm (Prod (x, tt) t) = liftA2 S.Prod (resolveTerm tt) (withVar x $ resolveTerm t)
+> resolveTerm (Sort s) = return $ S.Sort s
+> resolveTerm (Case t x ir tt bs) = do
+>     t' <- resolveTerm t
+>     (i, is) <- resolveIndRef ir
+>     tt' <- withVars (x:is) $ resolveTerm tt
+>     bs' <- mapM resolveBranch bs
+>     cbs <- mapM (matchBranch bs') $ iConstructors i
+>     return $ S.Case t' i tt' cbs
+>
+> resolveFun :: MonadResolver m => ParseFun -> m S.Function
+> resolveFun f = do
+>     traceM $ "Processing " ++ pfName f
+>     ft <- resolveTerm (pfType f)
+>     fb <- withVars (pfArity f) $ resolveTerm (pfBody f)
+>     let rf = Function (pfName f) (length $ pfArity f) ft fb
+>     emitFun (pfName f) rf
+>     return rf
+>
+> resolveParams :: MonadResolver m => [ParseParam] -> m [S.Term]
+> resolveParams = foldr (\(x, t) m -> liftA2 (:) (resolveTerm t) (withVar x m)) (return [])
+>
+> resolveConstr :: MonadResolver m => ParseConstr -> m S.Constructor
+> resolveConstr pc = do
+>     ps' <- resolveParams (pcParams pc)
+>     is' <- withVars (fst $ unzip $ pcParams pc) $ mapM resolveTerm (pcIndices pc)
+>     return $ Constructor ps' is' (pcName pc)
+>
+> resolveInd :: MonadResolver m => ParseInd -> m S.Inductive
+> resolveInd pi = do
+>     rec i' <- emitInd (piName pi) i' >> do
+>          (ps', is') <- splitAt (length $ piParams pi) <$> resolveParams (piParams pi ++ piArity pi)
+>          cs <- withVars (map fst $ piParams pi) $ mapM resolveConstr (piConstructors pi)
+>          return $ Inductive ps' is' (piSort pi) cs (piName pi)
+>     emitConstructors i'
+>     return i'
+> 
+> resolveDef :: MonadResolver m => ParseDef -> m Definition
+> resolveDef d = do
+>     dc <- either (fmap Left . resolveInd) (fmap Right . resolveFun) d
+>     traceM $ "Resolved " ++ either piName pfName d
+>     let def = Definition Public dc
+>     emitDef (dName def) def
+>     return def
+>
+> resolveDefs :: ModuleHeader -> GlobalScope -> [(String, ParseDef)] -> Either ImportError (Map.Map String Definition)
+> resolveDefs mh gs ps = (rsDefs . snd) <$> (runExcept $ runReaderT (runStateT (mapM (resolveDef . snd) ps <* log) state) env)
+>     where
+>         env = ResolveEnv { reVars = [], reHeader = mh }
+>         state = ResolveState { rsScope = gs, rsDefs = Map.empty }
+>         log = gets (show . Map.map dName . rsDefs) >>= traceM

@@ -6,6 +6,7 @@ and into the interpreter.
 > import Language.Maypop.Syntax
 > import Language.Maypop.Modules
 > import Language.Maypop.Checking
+> import Language.Maypop.Parser
 > import Control.Monad.Except
 > import Control.Monad.Reader
 > import Control.Monad.State
@@ -33,7 +34,7 @@ Here is the type class:
 
 > class Monad m => MonadModule m where
 >     moduleHeader :: String -> m (Either LoadingError (String, ModuleHeader))
->     moduleContent :: String -> GlobalScope -> m (Either LoadingError Module)
+>     moduleContent :: String -> m (Either LoadingError [(String, ParseDef)])
 
 In principle, we'll have module files on disk. But where? There's probably a standard directory
 for the "base" package, and then there's the source folder of the user-created Maypop project.
@@ -114,7 +115,9 @@ Once that's done, we return the resulting module.
 >     ms <- mapM (local (mhName mh:) . loadModule) ss
 >     gss <- liftEither $ first ImportError $ zipWithM moduleScope is ms
 >     gs <- liftEither $ first ImportError $ foldM mergeScopes emptyScope gss
->     m <- moduleContent path gs >>= liftEither
+>     pdefs <- moduleContent path >>= liftEither
+>     defs <- liftEither $ first ImportError $ resolveDefs mh gs pdefs
+>     let m = Module mh defs
 >     liftEither $ first (Language.Maypop.Loading.TypeError) $ checkModule m
 >     return m
 
