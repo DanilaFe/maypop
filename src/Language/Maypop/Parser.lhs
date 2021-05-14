@@ -258,6 +258,15 @@ repetitive.
 > parseDefs :: String -> String -> Either ParseError [(String, ParseDef)]
 > parseDefs = runP (header *> many definition <* eof) ()
 >
+> data ResolveError
+>     = UnknownReference
+>     | AmbiguousReference
+>     | NotInductive
+>     | InvalidArity
+>     | IncompleteMatch
+>     | ImportError ImportError
+>     deriving Show
+>
 > data ResolveEnv = ResolveEnv
 >     { reVars :: [String]
 >     , reHeader :: ModuleHeader
@@ -280,10 +289,10 @@ repetitive.
 >     , rsDefs :: Map.Map String Definition
 >     }
 >
-> class (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ImportError m, MonadFix m)
+> class (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ResolveError m, MonadFix m)
 >     => MonadResolver m where
 >
-> instance (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ImportError m, MonadFix m)
+> instance (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ResolveError m, MonadFix m)
 >     => MonadResolver m where
 > 
 > emitExport :: MonadResolver m => String -> ExportVariant -> m ()
@@ -293,7 +302,7 @@ repetitive.
 >     let nQual = Map.singleton (qualName mn s) export
 >     let nUnqual = Map.singleton (unqualName s) [export]
 >     let ngs = GlobalScope nQual nUnqual
->     gs' <- gets ((`mergeScopes` ngs) . rsScope) >>= liftEither
+>     gs' <- gets ((`mergeScopes` ngs) . rsScope) >>= (liftEither . first ImportError)
 >     modify $ \rs -> rs { rsScope = gs' }
 >
 > emitInd :: MonadResolver m => String -> Inductive -> m ()
@@ -316,9 +325,9 @@ repetitive.
 >     IndExport i -> S.Ind i
 > 
 > narrowExports :: MonadResolver m => [Export] -> m Export
-> narrowExports [] = throwError (error "unknown ref")
+> narrowExports [] = throwError UnknownReference
 > narrowExports [x] = return x
-> narrowExports xs = throwError (error "ambigous ref")
+> narrowExports xs = throwError AmbiguousReference
 >
 > lookupUnqual :: MonadResolver m => String -> m S.Term
 > lookupUnqual s = do
@@ -328,7 +337,7 @@ repetitive.
 > lookupQual :: MonadResolver m => Symbol -> m S.Term
 > lookupQual s = do
 >     me <- gets (Map.lookup s . sQualified . rsScope)
->     maybe (throwError (error "unknown qual ref")) (return . exportToTerm) me
+>     maybe (throwError UnknownReference) (return . exportToTerm) me
 >
 > lookupRef :: MonadResolver m => ParseRef -> m S.Term
 > lookupRef (SymRef s) = lookupQual s
@@ -339,20 +348,20 @@ repetitive.
 >     t <- lookupRef r
 >     case t of
 >         S.Ind i -> return i
->         _ -> throwError (error "not ind") -- TODO not the right error
+>         _ -> throwError NotInductive
 >
 > resolveIndRef :: MonadResolver m => ParseIndRef -> m (S.Inductive, [String])
 > resolveIndRef (r, is) = do
 >     i <- lookupInd r
 >     if length (iArity i) == length is
 >      then return (i, is)
->      else throwError (error "invalid arity") -- TODO not the right error either
+>      else throwError InvalidArity
 >
 > resolveBranch :: MonadResolver m => ParseBranch -> m (String, S.Term)
 > resolveBranch (s, ps, t) = (,) s <$> withVars ps (resolveTerm t)
 >
 > matchBranch :: MonadResolver m => [(String, S.Term)] -> Constructor -> m S.Term
-> matchBranch bs c = maybe (throwError (error "missing constructor")) return $ lookup (cName c) bs 
+> matchBranch bs c = maybe (throwError IncompleteMatch) return $ lookup (cName c) bs 
 >
 > resolveTerm :: MonadResolver m => ParseTerm -> m S.Term
 > resolveTerm (Ref (StrRef s)) = do
@@ -376,12 +385,11 @@ repetitive.
 >
 > resolveFun :: MonadResolver m => ParseFun -> m S.Function
 > resolveFun f = do
->     traceM $ "Processing " ++ pfName f
 >     ft <- resolveTerm (pfType f)
->     fb <- withVars (pfArity f) $ resolveTerm (pfBody f)
->     let rf = Function (pfName f) (length $ pfArity f) ft fb
->     emitFun (pfName f) rf
->     return rf
+>     rec f' <- emitFun (pfName f) f' >> do
+>          fb <- withVars (pfArity f) $ resolveTerm (pfBody f)
+>          return $ Function (pfName f) (length $ pfArity f) ft fb
+>     return f'
 >
 > resolveParams :: MonadResolver m => [ParseParam] -> m [S.Term]
 > resolveParams = foldr (\(x, t) m -> liftA2 (:) (resolveTerm t) (withVar x m)) (return [])
@@ -394,8 +402,8 @@ repetitive.
 >
 > resolveInd :: MonadResolver m => ParseInd -> m S.Inductive
 > resolveInd pi = do
+>     (ps', is') <- splitAt (length $ piParams pi) <$> resolveParams (piParams pi ++ piArity pi)
 >     rec i' <- emitInd (piName pi) i' >> do
->          (ps', is') <- splitAt (length $ piParams pi) <$> resolveParams (piParams pi ++ piArity pi)
 >          cs <- withVars (map fst $ piParams pi) $ mapM resolveConstr (piConstructors pi)
 >          return $ Inductive ps' is' (piSort pi) cs (piName pi)
 >     emitConstructors i'
@@ -404,14 +412,12 @@ repetitive.
 > resolveDef :: MonadResolver m => ParseDef -> m Definition
 > resolveDef d = do
 >     dc <- either (fmap Left . resolveInd) (fmap Right . resolveFun) d
->     traceM $ "Resolved " ++ either piName pfName d
 >     let def = Definition Public dc
 >     emitDef (dName def) def
 >     return def
 >
-> resolveDefs :: ModuleHeader -> GlobalScope -> [(String, ParseDef)] -> Either ImportError (Map.Map String Definition)
-> resolveDefs mh gs ps = (rsDefs . snd) <$> (runExcept $ runReaderT (runStateT (mapM (resolveDef . snd) ps <* log) state) env)
+> resolveDefs :: ModuleHeader -> GlobalScope -> [(String, ParseDef)] -> Either ResolveError (Map.Map String Definition)
+> resolveDefs mh gs ps = (rsDefs . snd) <$> (runExcept $ runReaderT (runStateT (mapM (resolveDef . snd) ps) state) env)
 >     where
 >         env = ResolveEnv { reVars = [], reHeader = mh }
 >         state = ResolveState { rsScope = gs, rsDefs = Map.empty }
->         log = gets (show . Map.map dName . rsDefs) >>= traceM

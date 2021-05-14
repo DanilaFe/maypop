@@ -6,7 +6,7 @@ and into the interpreter.
 > import Language.Maypop.Syntax
 > import Language.Maypop.Modules
 > import Language.Maypop.Checking
-> import Language.Maypop.Parser
+> import Language.Maypop.Parser hiding (ImportError)
 > import Control.Monad.Except
 > import Control.Monad.Reader
 > import Control.Monad.State
@@ -60,6 +60,7 @@ name! This is also an error.
 >     | MismatchedName
 >     | Cycle
 >     | ImportError ImportError
+>     | ResolveError ResolveError
 >     | TypeError TypeError
 >     | ParseError ParseError
 >     deriving Show
@@ -116,7 +117,7 @@ Once that's done, we return the resulting module.
 >     gss <- liftEither $ first ImportError $ zipWithM moduleScope is ms
 >     gs <- liftEither $ first ImportError $ foldM mergeScopes emptyScope gss
 >     pdefs <- moduleContent path >>= liftEither
->     defs <- liftEither $ first ImportError $ resolveDefs mh gs pdefs
+>     defs <- liftEither $ first ResolveError $ resolveDefs mh gs pdefs
 >     let m = Module mh defs
 >     liftEither $ first (Language.Maypop.Loading.TypeError) $ checkModule m
 >     return m
