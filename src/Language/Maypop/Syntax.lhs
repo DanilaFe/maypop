@@ -280,7 +280,7 @@ with other possible monadic effects captured by the arbitrary monad `m`:
 >         trans (Prod t1 t2) = liftA2 Prod (trans t1) (deepen 1 $ trans t2)
 >         trans (Case t i tt ts) = do
 >             t' <- trans t
->             tt' <- deepen (length $ iArity i) $ trans tt
+>             tt' <- deepen (1 + length (iArity i)) $ trans tt
 >             ts' <- zipWithM (deepen . length . cParams) (iConstructors i) (map trans ts)
 >             return $ Case t' i tt' ts'
 >         trans t = return t

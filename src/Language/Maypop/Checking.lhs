@@ -81,9 +81,10 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >     let constr (ci,c) b = do
 >          let cps = zipWith subPs [0..] $ cParams c
 >          let inds' = map (subPs $ length cps) $ cIndices c
->          let expt = foldl App (Constr i ci) $ map (Ref . negate) $ [1..length cps]
+>          let rcps = map (Ref . negate) $ [1..length cps]
+>          let expt = foldl App (Constr i ci) $ rcps
 >          let et = substituteMany 0 (expt:inds') tt
->          at <- offsetFree (negate $ length cps) <$> (extendAll cps $ infer b)
+>          at <- substituteMany 0 rcps <$> (extendAll cps $ infer b)
 >          guardE TypeError $ eval at == eval et
 >     let ar = zipWith (\n -> offsetFree 1 . subPs n) [0..] $ iArity i
 >     extendAll (tType: ar) $ inferS tt
