@@ -40,3 +40,11 @@ replace t P x y eq Px =
     | Refl -> Px
     end
 end
+
+cong : forall (A : Type 0). forall (B : Type 0). forall (C : A -> B).
+       forall (x : A). forall (y : A). Eq A x y -> Eq B (C x) (C y) where
+cong t1 t2 C x y eq =
+    match eq as _ in Eq _ z return Eq t2 (C x) (C z) with
+    | Refl -> Refl t2 (C x)
+    end
+end
