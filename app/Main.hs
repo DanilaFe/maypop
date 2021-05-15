@@ -28,7 +28,7 @@ main = do
     file <- head <$> getArgs
     mm <- defaultLoadFile file
     case mm of
-        Left e -> putStrLn $ "Error while checking the file: " ++ show e
+        Left e -> error $ "Error while checking the file: " ++ show e
         Right m -> do
             putStrLn $ "Successfully read module " ++ show (mName m)
             putStrLn "Functions: "
