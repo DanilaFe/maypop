@@ -11,3 +11,4 @@ jobs:
                   enable-stack: true
                   stack-version: 'latest'
             - run: stack test
+            - run: stack run stdlib/Prelude.mp
