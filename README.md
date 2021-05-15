@@ -14,21 +14,28 @@ be up-to-date with the current commit on this repository.
 ## What Works So Far
 Currently, the Haskell code included can:
 
-* Represent Maypop terms, including inductive data types.
+* Represent Maypop terms, including inductive data types (GADTs).
 * Evaluate these terms.
 * Pretty print the terms.
 * Check the types of various terms (without type inference).
 * Perform unification (required for type inference).
-* Parse a (currently concrete) syntax for the language
+* Parse a (currently ugly) syntax for the language
 * Organize code into modules and import required definitions
 * Typecheck modules.
 
+Using Maypop, we were able to define the addition of natural
+numbers, and __prove the following properties about it__:
+
+* `0 + n = n`. This follows immediately from the definition of addition,
+and is not particularly interesting.
+* `n + 0 = n`. This does _not_ immediately follow from the 
+definition of addition, and needs to be proved by induction.
+* `(1 + n) + m = n + (1 + m)`, which is a lemma used for the proof of...
+* `n + m = m + n`, also known as commutativity of addition!
+
 What still needs to be done:
 
-* Recursive data types in the parser. 
 * Type inference (save users the effort of writing types)
-* A module system (to allow imports and abstraction)
-* A prelude of common functions
 * Tactics to make writing proofs easier
 * Type classes (and automatic search for them)
 
