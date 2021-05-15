@@ -48,3 +48,10 @@ cong t1 t2 C x y eq =
     | Refl -> Refl t2 (C x)
     end
 end
+
+sym : forall (A : Type 0). forall (x : A). forall (y : A). Eq A x y -> Eq A y x where
+sym t x y eq =
+    match eq as _ in Eq _ z return Eq t z x with
+    | Refl -> Refl t x
+    end
+end
