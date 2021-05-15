@@ -29,7 +29,6 @@ repetitive.
 > import Data.List
 > import Data.Maybe
 > import Data.Functor.Identity
-> import Debug.Trace
 >
 >
 > data ParseRef = SymRef Symbol | StrRef String

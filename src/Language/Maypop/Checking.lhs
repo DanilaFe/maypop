@@ -5,6 +5,7 @@ Let's work on type inference a little.
 > {-# LANGUAGE FlexibleContexts #-}
 > module Language.Maypop.Checking where
 > import Language.Maypop.Syntax
+> import Language.Maypop.Eval
 > import Language.Maypop.Modules
 > import Control.Monad.Reader
 > import Control.Monad.Except
@@ -13,6 +14,7 @@ Let's work on type inference a little.
 > import Data.Void
 > import Data.Either
 > import qualified Data.Map as Map
+> import Debug.Trace
 
 First, a little utility function to compute the type of a type. This
 is straight out of the paper on the Calculus of Inductive Constructions.
@@ -53,7 +55,7 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 > infer (App f a) = do
 >     (ta, tb) <- inferP f
 >     targ <- infer a
->     if ta == targ
+>     if eval ta == eval targ
 >      then return (substitute 0 a tb)
 >      else throwError TypeError
 > infer (Let l i) = infer l >>= flip extend (infer i)
@@ -83,7 +85,7 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >          let expt = foldl App (Constr i ci) $ map Ref $ reverse $ [0..length cps-1]
 >          let et = substituteMany 0 (expt:inds') tt
 >          at <- offsetFree (negate $ length cps) <$> (extendAll cps $ infer b)
->          guardE TypeError $ at == et
+>          guardE TypeError $ eval at == eval et
 >     let ar = zipWith (\n -> offsetFree 1 . subPs n) [0..] $ iArity i
 >     extendAll (tType: ar) $ inferS tt
 >     zipWithM constr (zip [0..] $ iConstructors i) ts
@@ -111,7 +113,7 @@ place where a type is needed.
 We can use this to define a specialized version of `infer`:
 
 > inferS :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m Sort
-> inferS t = infer t >>= intoSort
+> inferS t = eval <$> infer t >>= intoSort
 
 A similar casting function to `intoSort` is `intoProduct`, which helps
 us require that a term is a dependent product (this is used for the application rule).
@@ -125,7 +127,7 @@ helps the type system "remember" that this is not just any term that passed our 
 Once again, we define a specailized version of `infer` for products:
 
 > inferP :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m (Term, Term)
-> inferP t = infer t >>= intoProduct
+> inferP t = eval <$> infer t >>= intoProduct
 
 Just as we may want to cast a data type into a product, we may also want to cast
 it into an inductive data type, extracting the parameters and indices. Things
@@ -145,7 +147,7 @@ that a type constructor is fully applied and well formed. Thus, we forego the `i
 function, and jump straight into `inferI`.
 
 > inferI :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m (Inductive, [Term])
-> inferI t = infer t >>= \tt -> inferS tt >> collectApps tt
+> inferI t = eval <$> infer t >>= \tt -> inferS tt >> collectApps tt
 
 Next, we have to be careful about the rules of the Calculus of Constructions. We
 can't _just_ put a type straight from a lambda into the environment; it so happens
@@ -184,7 +186,7 @@ We should also write some code to perform type checking on entire modules.
 > checkFunction :: (MonadReader [Term] m, MonadError TypeError m) => Function -> m Term
 > checkFunction f = do
 >     ft <- extendAll (fArity f) $ infer $ fBody f
->     guardE TypeError $ ft == (fType f)
+>     guardE TypeError $ eval ft == eval (fType f)
 >     return ft
 >
 > checkModule :: Module -> Either TypeError ()
