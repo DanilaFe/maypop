@@ -14,7 +14,6 @@ Let's work on type inference a little.
 > import Data.Void
 > import Data.Either
 > import qualified Data.Map as Map
-> import Debug.Trace
 
 First, a little utility function to compute the type of a type. This
 is straight out of the paper on the Calculus of Inductive Constructions.
@@ -82,7 +81,7 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >     let constr (ci,c) b = do
 >          let cps = zipWith subPs [0..] $ cParams c
 >          let inds' = map (subPs $ length cps) $ cIndices c
->          let expt = foldl App (Constr i ci) $ map Ref $ reverse $ [0..length cps-1]
+>          let expt = foldl App (Constr i ci) $ map (Ref . negate) $ [1..length cps]
 >          let et = substituteMany 0 (expt:inds') tt
 >          at <- offsetFree (negate $ length cps) <$> (extendAll cps $ infer b)
 >          guardE TypeError $ eval at == eval et
