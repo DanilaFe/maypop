@@ -385,14 +385,23 @@ repetitive.
 >
 > resolveFun :: MonadResolver m => ParseFun -> m S.Function
 > resolveFun f = do
->     ft <- resolveTerm (pfType f)
+>     fts <- resolveTerm (pfType f)
+>     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
 >     rec f' <- emitFun (pfName f) f' >> do
 >          fb <- withVars (pfArity f) $ resolveTerm (pfBody f)
->          return $ Function (pfName f) (length $ pfArity f) ft fb
+>          return $ Function (pfName f) ats rt fb
 >     return f'
+>
+> collectFunArgs :: [String] -> S.Term -> Either ResolveError ([S.Term], S.Term)
+> collectFunArgs [] t = return $ ([], t)
+> collectFunArgs (_:xs) (S.Prod l r) = first (l:) <$> collectFunArgs xs r
+> collectFunArgs l _ = throwError InvalidArity
 >
 > resolveParams :: MonadResolver m => [ParseParam] -> m [S.Term]
 > resolveParams = foldr (\(x, t) m -> liftA2 (:) (resolveTerm t) (withVar x m)) (return [])
+>
+> resolveWithParams :: MonadResolver m => [ParseParam] -> m a -> m ([S.Term], a)
+> resolveWithParams ps m = foldr (\(x, t) m -> liftA2 (first . (:)) (resolveTerm t) (withVar x m)) ((,) [] <$> m) ps
 >
 > resolveConstr :: MonadResolver m => ParseConstr -> m S.Constructor
 > resolveConstr pc = do

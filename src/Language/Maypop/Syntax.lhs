@@ -143,41 +143,22 @@ return type against the computed type of the function definition's body.
 
 Before we get to that, though, let's define a data structure for a function
 definition. This isn't particularly difficult; we need only the name,
-arity (number of parameters), return type, and body of the function. This
-is a little different from the way that we defined our inductive data type;
-there, the "arity" was an explicit list of argument types for the 
-inductive type constructor. This is because we can very well have cases
-where the return type depends on the previous arguments, and also
-because this type can be a reference to another definition. Consider,
-for instance, the following snippet, inpired by an example from Philip
-Wadler's _Monads for Functional Programming_:
-
-```
-eval : Expr -> State Int
-eval e s = ...
-```
-
-Even though there are two arguments (the expression `e` being evaluated
-and the state `s` from the state monad implementation), the type
-only lists one. This is because `State x` can be written as:
-
-```
-State : Type -> Type
-State t = StateData -> (StateData, t)
-```
-
-We want to allow these kinds of definitions, and thus, we won't strongly
-tie the number of arguments to the types of these arguments.
-
-With that out of the way, here's our data structure for function
-definitions:
+arity (number of parameters), return type, and body of the function. Much
+like we did with inductive types, we represent the arity by a list of types,
+to ensure that every one of the function's arguments _actually_ has a type.
 
 > data Function = Function
 >     { fName :: String
->     , fArity :: Int
+>     , fArity :: [Term]
 >     , fType :: Term
 >     , fBody :: Term
 >     }
+
+It's always good to have in hand the _whole_ type of the function (`Args -> Return`).
+This is a straightforward right-associative fold:
+
+> fFullType :: Function -> Term
+> fFullType f = foldr Prod (fType f) (fArity f)
 
 One moment, though. What about the parameter names, like `n` from
 the `factorial` example above? It so happens that we will be using DeBrujin

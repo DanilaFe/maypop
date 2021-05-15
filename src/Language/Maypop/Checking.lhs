@@ -47,7 +47,7 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 
 > infer :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m Term
 > infer (Ref n) = nth n <$> ask >>= maybe (throwError (FreeVariable n)) return
-> infer (Fun f) = return $ fType f
+> infer (Fun f) = return $ fFullType f
 > infer (Param p) = absurd p
 > infer (Abs t b) = Prod t <$> extend t (infer b)
 > infer (App f a) = do
@@ -181,17 +181,11 @@ a total order, but we do have a join semilattice.
 
 We should also write some code to perform type checking on entire modules.
 
-> checkFunction :: Function -> Either TypeError Term
+> checkFunction :: (MonadReader [Term] m, MonadError TypeError m) => Function -> m Term
 > checkFunction f = do
->     (ps, bt) <- collectNProd (fArity f) (fType f)
->     ft <- runInfer' (zipWith offsetFree [1..] (reverse ps)) (fBody f)
->     guardE TypeError $ ft == bt
->     return bt
+>     ft <- extendAll (fArity f) $ infer $ fBody f
+>     guardE TypeError $ ft == (fType f)
+>     return ft
 >
-> collectNProd :: Int -> Term -> Either TypeError ([Term], Term)
-> collectNProd 0 t = return $ ([], t)
-> collectNProd n (Prod l r) = first (l:) <$> collectNProd (n-1) r
-> collectNProd n _ = throwError NotProduct
-
 > checkModule :: Module -> Either TypeError ()
-> checkModule m = mapM_ checkFunction $ rights $ map dContent $ Map.elems $ mDefinitions m
+> checkModule m = runReader (runExceptT $ mapM_ checkFunction $ rights $ map dContent $ Map.elems $ mDefinitions m) []

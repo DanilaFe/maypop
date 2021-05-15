@@ -5,6 +5,7 @@ In this module, we'll cover evaluating Maypop terms.
 > import Control.Monad
 > import Data.Bifunctor
 > import Data.Maybe
+> import Data.Void
 
 We'll go with normal-order evaluation. Lazy evaluation would
 require some degree of sharing, which would be a little
@@ -15,6 +16,7 @@ redex. This means that function arguments are substituted into
 a function before they are evaluated.
 
 > eval :: ParamTerm a -> ParamTerm a
+> eval (Fun f) = eval $ absurd <$> (foldr Abs (fBody f) (fArity f))
 > eval (Abs l r) = Abs (eval l) (eval r)
 > eval (App l r) = case eval l of
 >     (Abs _ b) -> eval $ substitute 0 r b
@@ -27,7 +29,7 @@ a function before they are evaluated.
 >     ((i', ci), xs) <- collectConstrApps (eval t)
 >     guard $ i == i'
 >     b <- nth ci ts
->     return $ eval $ substituteMany 0 xs b
+>     return $ eval $ substituteMany 0 (drop (length $ iParams i) xs) b
 > eval t = t
 
 > collectConstrApps :: ParamTerm a -> Maybe ((Inductive, Int), [ParamTerm a])

@@ -2,6 +2,7 @@ module Main where
 
 import System.Environment
 import Language.Maypop.Syntax
+import Language.Maypop.Eval
 import Language.Maypop.Modules
 import Language.Maypop.LoadingImpl
 import qualified Data.Map as Map
@@ -13,9 +14,14 @@ moduleFunctions m = rights $ map dContent $ Map.elems $ mDefinitions m
 printFunction :: Function -> IO ()
 printFunction f = mapM_ (putStrLn . ("  "++)) $
     [ "Function name: " ++ fName f
-    , "Function type: " ++ show (fType f)
+    , "Function type: " ++ show (fFullType f)
     , ""
     ]
+
+runMain :: Module -> IO ()
+runMain m = case Map.lookup "main" (mDefinitions m) of
+    Just Definition{dContent = Right f} -> putStrLn $ show $ eval (fBody f)
+    Nothing -> putStrLn "No main function!"
 
 main :: IO ()
 main = do
@@ -25,6 +31,7 @@ main = do
         Left e -> putStrLn $ "Error while checking the file: " ++ show e
         Right m -> do
             putStrLn $ "Successfully read module " ++ show (mName m)
-            putStrLn $ "Functions: "
+            putStrLn "Functions: "
             mapM_ printFunction (moduleFunctions m)
+            runMain m
     return ()
