@@ -156,8 +156,9 @@ repetitive.
 > prod :: Parser ()
 > prod = forall <|> pi
 >
-> param :: Parser ParseParam
-> param = paren $ pure (,) <*> ident <* sym ":" <*> term
+> param :: Parser [ParseParam]
+> param = paren $ pure combine <*> (many1 ident) <* sym ":" <*> term
+>     where combine xs t = [(x,t) | x <- xs]
 >
 > prop :: Parser Sort
 > prop = kw "Prop" >> return Prop
@@ -196,7 +197,7 @@ repetitive.
 > term' = sort <|> prodT <|> abs <|> let_ <|> (Ref <$> ref) <|> case_ <|> paren term
 >     where
 >         sort = Sort <$> (prop <|> type_)
->         gen k f = pure f <* k <*> param <* dot genParser <*> term
+>         gen k f = pure (flip (foldr f)) <* k <*> param <* dot genParser <*> term
 >         prodT = gen prod Prod
 >         abs = gen lambda Abs
 >         let_ = pure (curry Let) <* kw "let" <*> ident <* sym "=" <*> term <* kw "in" <*> term
@@ -211,7 +212,7 @@ repetitive.
 > term = buildExpressionParser opTable term'
 >
 > params :: Parser [ParseParam]
-> params = many param
+> params = concat <$> many param
 >
 > collectArity :: ParseTerm -> Parser ([ParseParam], Sort)
 > collectArity (Prod l r) = first (l:) <$> collectArity r

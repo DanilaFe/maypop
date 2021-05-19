@@ -15,6 +15,8 @@ Here, I'll define what a Maypop "term" is.
 > import Control.Monad.Writer
 > import Data.List
 > import Data.Void
+> import Data.Maybe
+> import Data.Bifunctor
 > import qualified Data.Set as Set
 >
 
@@ -433,9 +435,16 @@ and 2 for \\(a\\).
 
 And now, the pretty printer itself.
 
-> pretty :: Show a => ParamTerm a -> String
+> pretty :: (Show a, Eq a) => ParamTerm a -> String
 > pretty t = fst $ runState (runReaderT (prettyM 0 t) []) names
 >     where
+>         collectProd (Prod l r) | occurs 0 r = first (l:) $ collectProd r
+>         collectProd e = ([], e)
+>         prettyMGroup xs rm = do
+>             names <- replicateM (length xs) popName
+>             st <- maybe (return "??") (prettyM 0) (nth 0 xs)
+>             sr <- extendNames names rm
+>             return $ "∀(" ++ intercalate " " names ++ " : " ++ st ++ ")." ++ sr
 >         paren b s = if b then "(" ++ s ++ ")" else s
 >         prettyM n (Ref i) = nth i <$> ask >>= maybe (return $ "??" ++ show i) return
 >         prettyM n (Fun f) = return $ fName f
@@ -449,13 +458,12 @@ And now, the pretty printer itself.
 >             st1 <- prettyM 10 t1
 >             st2 <- prettyM 11 t2
 >             return $ st1 ++ " " ++ st2
->         prettyM n (Prod t1 t2) = do
+>         prettyM n t@(Prod t1 t2) = do
 >             if occurs 0 t2
 >              then paren (n >= 10) <$> do
->                 newName <- popName
->                 st1 <- prettyM 0 t1
->                 st2 <- extendNames [newName] $ prettyM 0 t2
->                 return $ "∀(" ++ newName ++ ":" ++ st1 ++ ")." ++ st2
+>                  let (ps, rt) = collectProd t
+>                  let pgs = groupBy (\t1 t2 -> offsetFree 1 t1 == t2) ps
+>                  foldr prettyMGroup (prettyM 0 rt) pgs
 >              else paren (n >= 10) <$> do
 >                  st1 <- prettyM 10 t1
 >                  st2 <- extendNames ["_"] $ prettyM 9 t2
