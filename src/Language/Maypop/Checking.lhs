@@ -32,6 +32,7 @@ come up.
 >     | NotProduct
 >     | NotInductive
 >     | TypeError
+>     | TypeMismatch Term Term
 >     | UnknownConstructor
 >     deriving Show
 
@@ -56,7 +57,7 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >     targ <- infer a
 >     if eval ta == eval targ
 >      then return (substitute 0 a tb)
->      else throwError TypeError
+>      else throwError $ TypeMismatch (eval ta) (eval targ)
 > infer (Let l i) = infer l >>= flip extend (infer i)
 > infer (Prod a b) = extend' a $ \ua -> inferS b >>= \ub -> return $ Sort $
 >     case ub of
@@ -85,7 +86,7 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >          let expt = foldl App (Constr i ci) $ rcps
 >          let et = substituteMany 0 (expt:inds') tt
 >          at <- substituteMany 0 rcps <$> (extendAll cps $ infer b)
->          guardE TypeError $ eval at == eval et
+>          guardE (TypeMismatch (eval at) (eval et)) $ eval at == eval et
 >     let ar = zipWith (\n -> offsetFree 1 . subPs n) [0..] $ iArity i
 >     extendAll (tType: ar) $ inferS tt
 >     zipWithM constr (zip [0..] $ iConstructors i) ts
@@ -186,7 +187,7 @@ We should also write some code to perform type checking on entire modules.
 > checkFunction :: (MonadReader [Term] m, MonadError TypeError m) => Function -> m Term
 > checkFunction f = do
 >     ft <- extendAll (fArity f) $ infer $ fBody f
->     guardE TypeError $ eval ft == eval (fType f)
+>     guardE (TypeMismatch (eval ft) (eval (fType f))) $ eval ft == eval (fType f)
 >     return ft
 >
 > checkModule :: Module -> Either TypeError ()
