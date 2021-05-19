@@ -154,6 +154,11 @@ to ensure that every one of the function's arguments _actually_ has a type.
 >     , fBody :: Term
 >     }
 
+{{< todo >}}Debug! Delete below instance. {{< /todo >}}
+
+> instance Show Function where
+>     show = fName
+
 It's always good to have in hand the _whole_ type of the function (`Args -> Return`).
 This is a straightforward right-associative fold:
 
@@ -232,7 +237,7 @@ for the second constructor).
 >     | Constr Inductive Int
 >     | Ind Inductive
 >     | Case (ParamTerm a) Inductive (ParamTerm a) [(ParamTerm a)]
->     deriving (Eq, Functor, Foldable)
+>     deriving (Eq, Show, Functor, Foldable)
 >
 > type Term = ParamTerm Void
 
@@ -428,45 +433,52 @@ and 2 for \\(a\\).
 
 And now, the pretty printer itself.
 
-> instance Show k => Show (ParamTerm k) where
->     show t = fst $ runState (runReaderT (showM t) []) names
->         where
->             showM (Ref i) = nth i <$> ask >>= maybe (return $ "??" ++ show i) return
->             showM (Fun f) = return $ fName f
->             showM (Param p) = return $ show p
->             showM (Abs t1 t2) = do
+> pretty :: Show a => ParamTerm a -> String
+> pretty t = fst $ runState (runReaderT (prettyM 0 t) []) names
+>     where
+>         paren b s = if b then "(" ++ s ++ ")" else s
+>         prettyM n (Ref i) = nth i <$> ask >>= maybe (return $ "??" ++ show i) return
+>         prettyM n (Fun f) = return $ fName f
+>         prettyM n (Param p) = return $ show p
+>         prettyM n (Abs t1 t2) = paren (n >= 10) <$> do
+>             newName <- popName
+>             st1 <- prettyM 0 t1
+>             st2 <- extendNames [newName] $ prettyM 0 t2
+>             return $ "λ(" ++ newName ++ ":" ++ st1 ++ ")." ++ st2
+>         prettyM n (App t1 t2) = paren (n >= 11) <$> do
+>             st1 <- prettyM 10 t1
+>             st2 <- prettyM 11 t2
+>             return $ st1 ++ " " ++ st2
+>         prettyM n (Prod t1 t2) = do
+>             if occurs 0 t2
+>              then paren (n >= 10) <$> do
 >                 newName <- popName
->                 st1 <- showM t1
->                 st2 <- extendNames [newName] $ showM t2
->                 return $ "λ(" ++ newName ++ ":" ++ st1 ++ ")." ++ st2
->             showM (App t1 t2) =
->                 liftA2 (\s1 s2 -> s1 ++ " (" ++ s2 ++ ")") (showM t1) (showM t2)
->             showM (Prod t1 t2) = do
->                 newName <- popName
->                 st1 <- showM t1
->                 st2 <- extendNames [newName] $ showM t2
->                 if occurs 0 t2
->                  then return $ "∀(" ++ newName ++ ":" ++ st1 ++ ")." ++ st2
->                  else return $ "(" ++ st1 ++ ") → " ++ st2
->             showM (Let t1 t2) = do
->                 newName <- popName
->                 st1 <- showM t1
->                 st2 <- extendNames [newName] $ showM t2
->                 return $ "let " ++ newName ++ " = " ++ st1 ++ " in " ++ st2
->             showM (Sort u) = return $ show u
->             showM (Constr i ci) = return $ maybe "??" cName $ nth ci (iConstructors i)
->             showM (Ind i) = return $ iName i
->             showM (Case t i tt ts) = do
->                 st <- showM t
->                 termName <- popName
->                 indexNames <- popNames (length $ iArity i)
->                 stt <- extendNames (termName:indexNames) (showM tt)
->                 sts <- zipWithM constr (iConstructors i) ts
->                 return $ "match " ++ st ++ " as " ++ termName ++ " in " ++ (intercalate " " $ iName i : indexNames) ++ " return " ++ stt ++ " with { " ++ intercalate "; " sts ++ " }"
->             constr c t = do
->                 paramNames <- popNames (length $ cParams c)
->                 st <- extendNames paramNames (showM t)
->                 return $ intercalate " " (cName c : paramNames) ++ " -> " ++ st
+>                 st1 <- prettyM 0 t1
+>                 st2 <- extendNames [newName] $ prettyM 0 t2
+>                 return $ "∀(" ++ newName ++ ":" ++ st1 ++ ")." ++ st2
+>              else paren (n >= 10) <$> do
+>                  st1 <- prettyM 10 t1
+>                  st2 <- extendNames ["_"] $ prettyM 9 t2
+>                  return $ st1 ++ " → " ++ st2
+>         prettyM n (Let t1 t2) = paren (n >= 10) <$> do
+>             newName <- popName
+>             st1 <- prettyM 0 t1
+>             st2 <- extendNames [newName] $ prettyM 0 t2
+>             return $ "let " ++ newName ++ " = " ++ st1 ++ " in " ++ st2
+>         prettyM n (Sort u) = return $ show u
+>         prettyM n (Constr i ci) = return $ maybe "??" cName $ nth ci (iConstructors i)
+>         prettyM n (Ind i) = return $ iName i
+>         prettyM n (Case t i tt ts) = paren (n >= 10) <$> do
+>             st <- prettyM 0 t
+>             termName <- popName
+>             indexNames <- popNames (length $ iArity i)
+>             stt <- extendNames (termName:indexNames) (prettyM 0 tt)
+>             sts <- zipWithM constr (iConstructors i) ts
+>             return $ "match " ++ st ++ " as " ++ termName ++ " in " ++ (intercalate " " $ iName i : indexNames) ++ " return " ++ stt ++ " with { " ++ intercalate "; " sts ++ " }"
+>         constr c t = do
+>             paramNames <- popNames (length $ cParams c)
+>             st <- extendNames paramNames (prettyM 0 t)
+>             return $ intercalate " " (cName c : paramNames) ++ " -> " ++ st
 
 In the above, we used a function `nth`. This is just a safe version of the `(!!)` operator
 that is built into Haskell. It'll come in handy in other modules, too.

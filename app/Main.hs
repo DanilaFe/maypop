@@ -14,13 +14,13 @@ moduleFunctions m = rights $ map dContent $ Map.elems $ mDefinitions m
 printFunction :: Function -> IO ()
 printFunction f = mapM_ (putStrLn . ("  "++)) $
     [ "Function name: " ++ fName f
-    , "Function type: " ++ show (fFullType f)
+    , "Function type: " ++ pretty (fFullType f)
     , ""
     ]
 
 runMain :: Module -> IO ()
 runMain m = case Map.lookup "main" (mDefinitions m) of
-    Just Definition{dContent = Right f} -> putStrLn $ show $ eval (fBody f)
+    Just Definition{dContent = Right f} -> putStrLn $ pretty $ eval (fBody f)
     Nothing -> putStrLn "No main function!"
 
 main :: IO ()
