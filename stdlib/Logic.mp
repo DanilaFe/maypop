@@ -3,11 +3,11 @@ module Logic
 data False : Prop where
 end
 
-data And (A : Prop) (B : Prop) : Prop where
+data And (A B : Prop) : Prop where
 | Both (a : A) (b : B) : And
 end
 
-data Or (A : Prop) (B : Prop) : Prop where
+data Or (A B : Prop) : Prop where
 | Left (a : A) : Or
 | Right (b : B) : Or
 end
@@ -16,8 +16,7 @@ Not : Prop -> Prop where
 Not p = p -> False
 end
 
-andOr : forall (A : Prop). forall (B : Prop).
-        And A B -> Or A B where
+andOr : forall (A B : Prop). And A B -> Or A B where
 andOr A B a =
     match a as x in And _ return Or A B with
     | Both a b -> Left A B a
@@ -41,15 +40,15 @@ replace t P x y eq Px =
     end
 end
 
-cong : forall (A : Type 0). forall (B : Type 0). forall (C : A -> B).
-       forall (x : A). forall (y : A). Eq A x y -> Eq B (C x) (C y) where
+cong : forall (A B : Type 0). forall (C : A -> B).
+       forall (x y : A). Eq A x y -> Eq B (C x) (C y) where
 cong t1 t2 C x y eq =
     match eq as _ in Eq _ z return Eq t2 (C x) (C z) with
     | Refl -> Refl t2 (C x)
     end
 end
 
-sym : forall (A : Type 0). forall (x : A). forall (y : A). Eq A x y -> Eq A y x where
+sym : forall (A : Type 0). forall (x y : A). Eq A x y -> Eq A y x where
 sym t x y eq =
     match eq as _ in Eq _ z return Eq t z x with
     | Refl -> Refl t x

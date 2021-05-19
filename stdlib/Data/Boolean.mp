@@ -1,6 +1,6 @@
 data Bool : Type 0 where
     | T : Bool
-    |F : Bool
+    | F : Bool
 end 
 
 and : forall (a b : Bool). Bool where

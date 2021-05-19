@@ -26,7 +26,7 @@ plus_n_O n =
     end
 end
 
-plus_S : forall (n : Nat). forall (m : Nat). Eq Nat (S (plus n m)) (plus n (S m)) where
+plus_S : forall (n m : Nat). Eq Nat (S (plus n m)) (plus n (S m)) where
 plus_S n m =
     match n as x in Nat _ return Eq Nat (S (plus x m)) (plus x (S m)) with
     | O -> Refl Nat (S m)
@@ -34,7 +34,7 @@ plus_S n m =
     end
 end
 
-plus_comm : forall (n : Nat). forall (m : Nat). Eq Nat (plus n m) (plus m n) where
+plus_comm : forall (n m : Nat). Eq Nat (plus n m) (plus m n) where
 plus_comm n m =
     match m as x in Nat _ return Eq Nat (plus n x) (plus x n) with
     | O -> plus_n_O n
