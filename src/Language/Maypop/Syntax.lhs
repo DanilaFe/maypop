@@ -181,6 +181,29 @@ an `Eq` instance based on its name:
 > instance Eq Function where
 >     f1 == f2 = fName f1 == fName f2
 
+The Calculus of Inductive Constructions gives special treatment to recursive (fixpoint)
+functions. This is because the evaluation rule of \\(\\delta\\)-reduction can cause serious trouble
+with functions that contain their own name. In brief, \\(\\delta\\)-reduction substitutes
+references to functions and constants with their definitions. If a function's definition
+contains a reference to itself, this reference can be replaced by the function's body
+using \\(\\delta\\)-reduction. This new instance of the function's body would again contain
+the function's name, which can once again be \\(\\delta\\)-reduced. This can go infinitely,
+creating bigger and bigger terms. We certainly don't want that.
+
+To work around this, fixpoint functions are coupled with information about their "decreasing"
+parameter. Recursive calls to a function within its body must always contain a "smaller"
+argument than was given to them. For example, if `f l` is a function on lists, with `l`
+being its decreasing parameter, it cannot recursively call itself as `f (Cons x l)`,
+because `Cons x l` is bigger than `l`. We will encode this in a new data type, `Fixpoint`:
+
+> data Fixpoint = Fixpoint
+>     { fxFun :: Function
+>     , fxDecArg :: Int
+>     }
+
+Here, `fxFun` refers to all the usual function-related data, and `fxDecArg` gives the number
+(0-indexed from the left of the parameter list) of the argument that must always be "shrinking".
+
 With the details of definitions out of the way, it's time to describe the terms in our language.
 There's a little trick to the way that we will define them: we'll parameterize
 our term datatype, making it, in general, a type constructor. We'll call this
