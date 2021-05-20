@@ -270,6 +270,7 @@ repetitive.
 > data ResolveEnv = ResolveEnv
 >     { reVars :: [String]
 >     , reHeader :: ModuleHeader
+>     , reCurrentFun :: Maybe String
 >     }
 >
 > withVar :: MonadReader ResolveEnv m => String -> m a -> m a
@@ -277,6 +278,9 @@ repetitive.
 >
 > withVars :: MonadReader ResolveEnv m => [String] -> m a -> m a
 > withVars xs m = foldr withVar m xs
+>
+> withFun :: MonadReader ResolveEnv m => String -> m a -> m a
+> withFun s = local $ \re -> re { reCurrentFun = Just s }
 >
 > currentModule :: MonadReader ResolveEnv m => m Symbol
 > currentModule = asks (mhName . reHeader)
@@ -387,7 +391,7 @@ repetitive.
 > resolveFun f = do
 >     fts <- resolveTerm (pfType f)
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
->     rec f' <- emitFun (pfName f) f' >> do
+>     rec f' <- withFun (pfName f) $ emitFun (pfName f) f' >> do
 >          fb <- withVars (pfArity f) $ resolveTerm (pfBody f)
 >          return $ Function (pfName f) ats rt fb
 >     return f'
@@ -428,5 +432,5 @@ repetitive.
 > resolveDefs :: ModuleHeader -> GlobalScope -> [(String, ParseDef)] -> Either ResolveError (Map.Map String Definition)
 > resolveDefs mh gs ps = (rsDefs . snd) <$> (runExcept $ runReaderT (runStateT (mapM (resolveDef . snd) ps) state) env)
 >     where
->         env = ResolveEnv { reVars = [], reHeader = mh }
+>         env = ResolveEnv { reVars = [], reHeader = mh, reCurrentFun = Nothing }
 >         state = ResolveState { rsScope = gs, rsDefs = Map.empty }
