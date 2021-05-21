@@ -272,7 +272,7 @@ repetitive.
 > data ResolveEnv = ResolveEnv
 >     { reVars :: [(String, VarSize)]
 >     , reHeader :: ModuleHeader
->     , reCurrentFun :: Maybe String
+>     , reCurrentFun :: Maybe ParseFun
 >     }
 >
 > withSizedVar :: MonadReader ResolveEnv m => VarSize -> String -> m a -> m a
@@ -287,8 +287,8 @@ repetitive.
 > withVars :: MonadReader ResolveEnv m => [String] -> m a -> m a
 > withVars xs m = foldr withVar m xs
 >
-> withFun :: MonadReader ResolveEnv m => String -> m a -> m a
-> withFun s = local $ \re -> re { reCurrentFun = Just s }
+> withFun :: MonadReader ResolveEnv m => ParseFun -> m a -> m a
+> withFun f = local $ \re -> re { reCurrentFun = Just f }
 >
 > currentModule :: MonadReader ResolveEnv m => m Symbol
 > currentModule = asks (mhName . reHeader)
@@ -411,7 +411,7 @@ repetitive.
 > resolveFun f = do
 >     fts <- resolveTerm (pfType f)
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
->     rec f' <- withFun (pfName f) $ emitFun (pfName f) f' >> do
+>     rec f' <- withFun f $ emitFun (pfName f) f' >> do
 >          fb <- withSizedVars Original (pfArity f) $ resolveTerm (pfBody f)
 >          return $ Function (pfName f) ats rt fb
 >     return f'
