@@ -269,6 +269,10 @@ repetitive.
 >
 > data VarSize = Original | SmallerThan String | Unknown deriving Show
 >
+> varParent :: VarSize -> Maybe String
+> varParent (SmallerThan s) = Just s
+> varParent _ = Nothing
+>
 > data ResolveEnv = ResolveEnv
 >     { reVars :: [(String, VarSize)]
 >     , reHeader :: ModuleHeader
@@ -344,6 +348,17 @@ repetitive.
 > narrowExports [x] = return x
 > narrowExports xs = throwError AmbiguousReference
 >
+> smallerParams :: [Maybe (String, VarSize)] -> Set.Set String
+> smallerParams mps = Set.fromList $ catMaybes $ map (>>=(varParent . snd)) mps
+>
+> recordFixpoint :: MonadResolver m => String -> ParseFun -> m ()
+> recordFixpoint s f
+>     | s /= pfName f = return ()
+>     | otherwise = do
+>         let params = take (length $ pfArity f) []
+>         smallerParams <- smallerParams <$> mapM termSize params
+>         return ()
+> 
 > lookupUnqual :: MonadResolver m => String -> m S.Term
 > lookupUnqual s = do
 >     es <- gets (fromMaybe [] . Map.lookup (unqualName s) . sUnqualified . rsScope)
@@ -378,13 +393,17 @@ repetitive.
 > matchBranch :: MonadResolver m => [(String, S.Term)] -> Constructor -> m S.Term
 > matchBranch bs c = maybe (throwError IncompleteMatch) return $ lookup (cName c) bs 
 >
-> caseVarSize :: MonadResolver m => ParseTerm -> m VarSize
-> caseVarSize (Ref (StrRef s)) = do
->     vs <- varSize s
->     return $ case vs of
->          Original -> SmallerThan s
->          _ -> vs
-> caseVarSize _ = return Unknown
+> termSize :: MonadResolver m => ParseTerm -> m (Maybe (String, VarSize))
+> termSize (Ref (StrRef s)) = Just . (,) s <$> varSize s
+> termSize _ = return Nothing
+>
+> caseTermSize :: MonadResolver m => ParseTerm -> m VarSize
+> caseTermSize t = do
+>     mts <- termSize t
+>     return $ case mts of
+>         Just (s, Original) -> SmallerThan s
+>         Just (_, vs) -> vs
+>         _ -> Unknown
 >
 > resolveTerm :: MonadResolver m => ParseTerm -> m S.Term
 > resolveTerm (Ref (StrRef s)) = do
@@ -400,7 +419,7 @@ repetitive.
 > resolveTerm (Sort s) = return $ S.Sort s
 > resolveTerm (Case t x ir tt bs) = do
 >     t' <- resolveTerm t
->     vs <- caseVarSize t
+>     vs <- caseTermSize t
 >     (i, is) <- resolveIndRef ir
 >     tt' <- withVars (x:is) $ resolveTerm tt
 >     bs' <- mapM (resolveBranch vs) bs
