@@ -31,7 +31,7 @@ repetitive.
 > import Data.Maybe
 > import Data.Functor.Identity
 >
-> data ParseRef = SymRef Symbol | StrRef String
+> data ParseRef = SymRef Symbol | StrRef String deriving Show
 >
 > type ParseParam = (String, ParseTerm)
 >
@@ -43,12 +43,14 @@ repetitive.
 >     | Prod ParseParam ParseTerm
 >     | Sort Sort
 >     | Case ParseTerm String ParseIndRef ParseTerm [ParseBranch]
+>     deriving Show
 >
 > data ParseConstr = ParseConstr
 >     { pcName :: String
 >     , pcParams :: [ParseParam]
 >     , pcIndices :: [ParseTerm]
 >     }
+>     deriving Show
 >
 > data ParseInd = ParseInd
 >     { piName :: String
@@ -57,6 +59,7 @@ repetitive.
 >     , piSort :: Sort
 >     , piConstructors :: [ParseConstr]
 >     }
+>     deriving Show
 >
 > data ParseFun = ParseFun
 >     { pfName :: String
@@ -64,6 +67,7 @@ repetitive.
 >     , pfType :: ParseTerm
 >     , pfBody :: ParseTerm
 >     }
+>     deriving Show
 >
 > type ParseDef = Either ParseInd ParseFun
 >
@@ -277,6 +281,7 @@ repetitive.
 >     { reVars :: [(String, VarSize)]
 >     , reHeader :: ModuleHeader
 >     , reCurrentFun :: Maybe ParseFun
+>     , reApps :: [ParseTerm]
 >     }
 >
 > withSizedVar :: MonadReader ResolveEnv m => VarSize -> String -> m a -> m a
@@ -293,6 +298,12 @@ repetitive.
 >
 > withFun :: MonadReader ResolveEnv m => ParseFun -> m a -> m a
 > withFun f = local $ \re -> re { reCurrentFun = Just f }
+>
+> withApp :: MonadReader ResolveEnv m => ParseTerm -> m a -> m a
+> withApp pt = local $ \re -> re { reApps = pt : reApps re }
+>
+> clearApps :: MonadReader ResolveEnv m => m a -> m a
+> clearApps = local $ \re -> re { reApps = [] }
 >
 > currentModule :: MonadReader ResolveEnv m => m Symbol
 > currentModule = asks (mhName . reHeader)
@@ -355,12 +366,13 @@ repetitive.
 > recordFixpoint s f
 >     | s /= pfName f = return ()
 >     | otherwise = do
->         let params = take (length $ pfArity f) []
+>         params <- take (length $ pfArity f) <$> asks reApps
 >         smallerParams <- smallerParams <$> mapM termSize params
 >         return ()
 > 
 > lookupUnqual :: MonadResolver m => String -> m S.Term
 > lookupUnqual s = do
+>     asks reCurrentFun >>= maybe (return ()) (recordFixpoint s)
 >     es <- gets (fromMaybe [] . Map.lookup (unqualName s) . sUnqualified . rsScope)
 >     exportToTerm <$> narrowExports es
 >
@@ -412,16 +424,16 @@ repetitive.
 >         Just i -> return $ (S.Ref i)
 >         Nothing -> lookupUnqual s
 > resolveTerm (Ref (SymRef s)) = lookupQual s
-> resolveTerm (Abs (x, tt) t) = liftA2 S.Abs (resolveTerm tt) (withVar x $ resolveTerm t)
-> resolveTerm (App l r) = liftA2 S.App (resolveTerm l) (resolveTerm r)
-> resolveTerm (Let (x, t) ti) = liftA2 S.Let (resolveTerm t) (withVar x $ resolveTerm ti)
-> resolveTerm (Prod (x, tt) t) = liftA2 S.Prod (resolveTerm tt) (withVar x $ resolveTerm t)
+> resolveTerm (Abs (x, tt) t) = clearApps $ liftA2 S.Abs (resolveTerm tt) (withVar x $ resolveTerm t)
+> resolveTerm (App l r) = liftA2 S.App (withApp r $ resolveTerm l) (resolveTerm r)
+> resolveTerm (Let (x, t) ti) = liftA2 S.Let (clearApps $ resolveTerm t) (withVar x $ resolveTerm ti)
+> resolveTerm (Prod (x, tt) t) = clearApps $ liftA2 S.Prod (resolveTerm tt) (withVar x $ resolveTerm t)
 > resolveTerm (Sort s) = return $ S.Sort s
 > resolveTerm (Case t x ir tt bs) = do
->     t' <- resolveTerm t
+>     t' <- clearApps $ resolveTerm t
 >     vs <- caseTermSize t
 >     (i, is) <- resolveIndRef ir
->     tt' <- withVars (x:is) $ resolveTerm tt
+>     tt' <- clearApps $ withVars (x:is) $ resolveTerm tt
 >     bs' <- mapM (resolveBranch vs) bs
 >     cbs <- mapM (matchBranch bs') $ iConstructors i
 >     return $ S.Case t' i tt' cbs
@@ -471,5 +483,5 @@ repetitive.
 > resolveDefs :: ModuleHeader -> GlobalScope -> [(String, ParseDef)] -> Either ResolveError (Map.Map String Definition)
 > resolveDefs mh gs ps = (rsDefs . snd) <$> (runExcept $ runReaderT (runStateT (mapM (resolveDef . snd) ps) state) env)
 >     where
->         env = ResolveEnv { reVars = [], reHeader = mh, reCurrentFun = Nothing }
+>         env = ResolveEnv { reVars = [], reHeader = mh, reCurrentFun = Nothing, reApps = [] }
 >         state = ResolveState { rsScope = gs, rsDefs = Map.empty }
