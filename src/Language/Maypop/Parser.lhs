@@ -269,6 +269,7 @@ repetitive.
 >     | InvalidArity
 >     | IncompleteMatch
 >     | ImportError ImportError
+>     | InvalidFixpoint
 >     deriving Show
 >
 > data VarSize = Original | SmallerThan String | Unknown deriving Show
@@ -317,6 +318,7 @@ repetitive.
 > data ResolveState = ResolveState
 >     { rsScope :: GlobalScope
 >     , rsDefs :: Map.Map String Definition
+>     , rsDecreasing :: Maybe (Set.Set String)
 >     }
 >
 > class (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ResolveError m, MonadFix m)
@@ -324,6 +326,20 @@ repetitive.
 >
 > instance (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ResolveError m, MonadFix m)
 >     => MonadResolver m where
+>
+> withNoDecreasing :: MonadState ResolveState m => m a -> m a
+> withNoDecreasing m = do
+>     dec <- gets rsDecreasing
+>     modify $ \rs -> rs { rsDecreasing = Nothing }
+>     a <- m
+>     modify $ \rs -> rs { rsDecreasing = dec }
+>     return a
+>
+> emitDecreasing :: MonadState ResolveState m => Set.Set String -> m ()
+> emitDecreasing s = modify $ \rs -> rs { rsDecreasing = updateDec (rsDecreasing rs) }
+>     where
+>         updateDec Nothing = Just s
+>         updateDec (Just s') = Just $ Set.intersection s s'
 > 
 > emitExport :: MonadResolver m => String -> ExportVariant -> m ()
 > emitExport s ev = do
@@ -368,7 +384,7 @@ repetitive.
 >     | otherwise = do
 >         params <- take (length $ pfArity f) <$> asks reApps
 >         smallerParams <- smallerParams <$> mapM termSize params
->         return ()
+>         emitDecreasing smallerParams
 > 
 > lookupUnqual :: MonadResolver m => String -> m S.Term
 > lookupUnqual s = do
@@ -438,13 +454,24 @@ repetitive.
 >     cbs <- mapM (matchBranch bs') $ iConstructors i
 >     return $ S.Case t' i tt' cbs
 >
+> decreasingIndices :: [String] -> [String] -> [Int]
+> decreasingIndices args dec = sort $ catMaybes $ map (`elemIndex` args) dec
+>
+> createFunOrFix :: MonadResolver m => [String] -> Function -> m Function
+> createFunOrFix args f = do
+>     dec <- fmap (decreasingIndices args . Set.toList) <$> gets rsDecreasing
+>     case dec of
+>         Just (x:xs) -> return f
+>         Just [] -> throwError InvalidFixpoint
+>         _ -> return f
+>
 > resolveFun :: MonadResolver m => ParseFun -> m S.Function
 > resolveFun f = do
 >     fts <- resolveTerm (pfType f)
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
->     rec f' <- withFun f $ emitFun (pfName f) f' >> do
+>     rec f' <- withNoDecreasing $ withFun f $ emitFun (pfName f) f' >> do
 >          fb <- withSizedVars Original (pfArity f) $ resolveTerm (pfBody f)
->          return $ Function (pfName f) ats rt fb
+>          createFunOrFix (pfArity f) $ Function (pfName f) ats rt fb
 >     return f'
 >
 > collectFunArgs :: [String] -> S.Term -> Either ResolveError ([S.Term], S.Term)
@@ -484,4 +511,4 @@ repetitive.
 > resolveDefs mh gs ps = (rsDefs . snd) <$> (runExcept $ runReaderT (runStateT (mapM (resolveDef . snd) ps) state) env)
 >     where
 >         env = ResolveEnv { reVars = [], reHeader = mh, reCurrentFun = Nothing, reApps = [] }
->         state = ResolveState { rsScope = gs, rsDefs = Map.empty }
+>         state = ResolveState { rsScope = gs, rsDefs = Map.empty, rsDecreasing = Nothing }
