@@ -23,13 +23,13 @@ repetitive.
 > import Text.Parsec.Expr
 > import Text.Parsec.Combinator
 > import qualified Data.Map as Map
+> import qualified Data.Set as Set
 > import Data.Foldable
 > import Data.Char
 > import Data.Bifunctor
 > import Data.List
 > import Data.Maybe
 > import Data.Functor.Identity
->
 >
 > data ParseRef = SymRef Symbol | StrRef String
 >
@@ -267,14 +267,22 @@ repetitive.
 >     | ImportError ImportError
 >     deriving Show
 >
+> data VarSize = Original | SmallerThan String | Unknown deriving Show
+>
 > data ResolveEnv = ResolveEnv
->     { reVars :: [String]
+>     { reVars :: [(String, VarSize)]
 >     , reHeader :: ModuleHeader
 >     , reCurrentFun :: Maybe String
 >     }
 >
+> withSizedVar :: MonadReader ResolveEnv m => VarSize -> String -> m a -> m a
+> withSizedVar vs s = local (\re -> re { reVars = (s,vs) : reVars re })
+>
 > withVar :: MonadReader ResolveEnv m => String -> m a -> m a
-> withVar s = local (\re -> re { reVars = s : reVars re })
+> withVar = withSizedVar Unknown
+>
+> withSizedVars :: MonadReader ResolveEnv m => VarSize -> [String] -> m a -> m a
+> withSizedVars vs xs m = foldr (withSizedVar vs) m xs
 >
 > withVars :: MonadReader ResolveEnv m => [String] -> m a -> m a
 > withVars xs m = foldr withVar m xs
@@ -286,7 +294,10 @@ repetitive.
 > currentModule = asks (mhName . reHeader)
 >
 > lookupVar :: MonadReader ResolveEnv m => String -> m (Maybe Int)
-> lookupVar s = asks (elemIndex s . reVars)
+> lookupVar s = asks (elemIndex s . map fst . reVars)
+>
+> varSize :: MonadReader ResolveEnv m => String -> m VarSize
+> varSize s = asks (fromMaybe Unknown . lookup s . reVars)
 >
 > data ResolveState = ResolveState
 >     { rsScope :: GlobalScope
@@ -361,11 +372,19 @@ repetitive.
 >      then return (i, is)
 >      else throwError InvalidArity
 >
-> resolveBranch :: MonadResolver m => ParseBranch -> m (String, S.Term)
-> resolveBranch (s, ps, t) = (,) s <$> withVars ps (resolveTerm t)
+> resolveBranch :: MonadResolver m => VarSize -> ParseBranch -> m (String, S.Term)
+> resolveBranch vs (s, ps, t) = (,) s <$> withSizedVars vs ps (resolveTerm t)
 >
 > matchBranch :: MonadResolver m => [(String, S.Term)] -> Constructor -> m S.Term
 > matchBranch bs c = maybe (throwError IncompleteMatch) return $ lookup (cName c) bs 
+>
+> caseVarSize :: MonadResolver m => ParseTerm -> m VarSize
+> caseVarSize (Ref (StrRef s)) = do
+>     vs <- varSize s
+>     return $ case vs of
+>          Original -> SmallerThan s
+>          _ -> vs
+> caseVarSize _ = return Unknown
 >
 > resolveTerm :: MonadResolver m => ParseTerm -> m S.Term
 > resolveTerm (Ref (StrRef s)) = do
@@ -381,9 +400,10 @@ repetitive.
 > resolveTerm (Sort s) = return $ S.Sort s
 > resolveTerm (Case t x ir tt bs) = do
 >     t' <- resolveTerm t
+>     vs <- caseVarSize t
 >     (i, is) <- resolveIndRef ir
 >     tt' <- withVars (x:is) $ resolveTerm tt
->     bs' <- mapM resolveBranch bs
+>     bs' <- mapM (resolveBranch vs) bs
 >     cbs <- mapM (matchBranch bs') $ iConstructors i
 >     return $ S.Case t' i tt' cbs
 >
@@ -392,7 +412,7 @@ repetitive.
 >     fts <- resolveTerm (pfType f)
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
 >     rec f' <- withFun (pfName f) $ emitFun (pfName f) f' >> do
->          fb <- withVars (pfArity f) $ resolveTerm (pfBody f)
+>          fb <- withSizedVars Original (pfArity f) $ resolveTerm (pfBody f)
 >          return $ Function (pfName f) ats rt fb
 >     return f'
 >
