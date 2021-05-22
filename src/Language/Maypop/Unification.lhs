@@ -7,6 +7,7 @@ used for type inference.
 > {-# LANGUAGE FunctionalDependencies #-}
 > {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 > {-# LANGUAGE TupleSections #-}
+> {-# LANGUAGE UndecidableInstances #-}
 > module Language.Maypop.Unification where
 > import Language.Maypop.InfiniteList
 > import Language.Maypop.Eval
@@ -21,7 +22,6 @@ used for type inference.
 > import Data.Bifunctor
 > import Data.Functor.Identity
 
-
 We'll define an MTL-style typeclass that encapsulates unification functionality.
 Since
 {{< sidenote "right" "fail-note" "the unification operation can fail," >}}
@@ -33,8 +33,7 @@ type of the stuff bound to the unification variables `v`. We also require the
 unification variables to be infinite (via the `Infinite` typeclass from `InfiniteList`), and for the values
 being unified to be `Unifiable`.
 
-> class (MonadError () m, Unifiable k v, Infinite k)
->         => MonadUnify k v m | m -> k, m -> v where
+> class (Unifiable k v, Infinite k, MonadPlus m) => MonadUnify k v m | m -> k, m -> v where
 >     fresh :: m k
 >     bind :: k -> v -> m v
 >     merge :: k -> k -> m ()
@@ -67,8 +66,8 @@ when the "occurs check" fails; why not define a convenient little
 operation to fail (in some monadic context `m` supporting exceptions)
 when we detect an infinite type?
 
-> guardOccurs :: (MonadError () m, Unifiable k v) => k -> v -> m ()
-> guardOccurs k v = if occurs k v then throwError () else return ()
+> guardOccurs :: (MonadPlus m, Unifiable k v) => k -> v -> m ()
+> guardOccurs k v = if occurs k v then mzero else return ()
 
 After we're done with unification, we can have an entire map of
 variables and their bindings. We can define a little function that uses
@@ -86,14 +85,14 @@ automatically compute the `Functor`, `Applicative`, and `Monad` instances,
 so the bulk of our work will be implementing the `MonadUnify` methods.
 
 > newtype UnifyT k v m a
->     = MkUnifyT { unwrapUnifyT :: ExceptT () (StateT (UnificationState k v) m) a }
->     deriving (Functor, Applicative, Monad, MonadError ())
+>     = MkUnifyT { unwrapUnifyT :: StateT (UnificationState k v) m a }
+>     deriving (Functor, Applicative, Monad, Alternative, MonadPlus)
 >
-> runUnifyT :: (Monad m, Infinite k, Unifiable k v) => UnifyT k v m a -> m (Either () a)
-> runUnifyT u = fst <$> runStateT (runExceptT $ unwrapUnifyT u) emptyState
+> runUnifyT :: (Monad m, Infinite k, Unifiable k v) => UnifyT k v m a -> m a
+> runUnifyT u = fst <$> runStateT (unwrapUnifyT u) emptyState
 >
-> runUnify :: (Infinite k, Unifiable k v) => UnifyT k v Identity a -> Either () a
-> runUnify u = runIdentity $ runUnifyT u
+> runUnify :: (Infinite k, Unifiable k v) => UnifyT k v Maybe a -> Maybe a
+> runUnify u = fst <$> runStateT (unwrapUnifyT u) emptyState
 
 There are some helper functions we can define for our `UnifyT` type. For instance,
 we want to retrieve data from the underlying `State` monad: we'd like to know which
@@ -138,7 +137,7 @@ to make map lookups possible in `UnificationState`, we place an additional
 `Ord` constraint on `k`. Since `UnifyT` is a monad transformer, this instance
 is polymorphic over a generic monad `m`.
 
-> instance (Unifiable k v, Infinite k, Ord k, Monad m) => MonadUnify k v (UnifyT k v m) where
+> instance (Unifiable k v, Infinite k, Ord k, Monad m, MonadPlus m) => MonadUnify k v (UnifyT k v m) where
 >     fresh = MkUnifyT $ do
 >         (k, us) <- gets popVar
 >         put us >> return k
@@ -218,7 +217,7 @@ data matches, too.
 >             unify' (Param k1) (Param k2) = merge k1 k2 >> return (Param k1)
 >             unify' (Param k1) t = bind k1 t
 >             unify' t (Param k2) = bind k2 t
->             unify' _ _ = throwError ()
+>             unify' _ _ = mzero
 >     occurs = elem
 >     substitute k v = subst
 >         where
