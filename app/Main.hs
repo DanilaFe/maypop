@@ -6,10 +6,10 @@ import Language.Maypop.Eval
 import Language.Maypop.Modules
 import Language.Maypop.LoadingImpl
 import qualified Data.Map as Map
-import Data.Either
+import Data.Maybe
 
 moduleFunctions :: Module -> [Function]
-moduleFunctions m = rights $ map dContent $ Map.elems $ mDefinitions m
+moduleFunctions m = catMaybes $ map (asFunction . dContent) $ Map.elems $ mDefinitions m
 
 printFunction :: Function -> IO ()
 printFunction f = mapM_ (putStrLn . ("  "++)) $
@@ -20,7 +20,8 @@ printFunction f = mapM_ (putStrLn . ("  "++)) $
 
 runMain :: Module -> IO ()
 runMain m = case Map.lookup "main" (mDefinitions m) of
-    Just Definition{dContent = Right f} -> putStrLn $ pretty $ eval (fBody f)
+    Just Definition{dContent = FunDef f} -> putStrLn $ pretty $ eval (fBody f)
+    Just Definition{dContent = FixDef f} -> putStrLn $ pretty $ eval (fBody (fxFun f))
     Nothing -> putStrLn "No main function!"
 
 main :: IO ()

@@ -12,7 +12,7 @@ Let's work on type inference a little.
 > import Data.Bifunctor
 > import Data.Bool
 > import Data.Void
-> import Data.Either
+> import Data.Maybe
 > import qualified Data.Map as Map
 
 First, a little utility function to compute the type of a type. This
@@ -191,4 +191,4 @@ We should also write some code to perform type checking on entire modules.
 >     return ft
 >
 > checkModule :: Module -> Either TypeError ()
-> checkModule m = runReader (runExceptT $ mapM_ checkFunction $ rights $ map dContent $ Map.elems $ mDefinitions m) []
+> checkModule m = runReader (runExceptT $ mapM_ checkFunction $ catMaybes $ map (asFunction . dContent) $ Map.elems $ mDefinitions m) []

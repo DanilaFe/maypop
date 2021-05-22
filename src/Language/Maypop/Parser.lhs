@@ -357,6 +357,12 @@ repetitive.
 > emitFun :: MonadResolver m => String -> Function -> m ()
 > emitFun s f = emitExport s (FunExport f)
 >
+> emitFix :: MonadResolver m => String -> Fixpoint -> m ()
+> emitFix s f = emitExport s (FixExport f)
+>
+> emitFunOrFix :: MonadResolver m => String -> Either Fixpoint Function -> m ()
+> emitFunOrFix s e = emitExport s $ either FixExport FunExport e
+>
 > emitDef :: MonadResolver m => String -> Definition -> m ()
 > emitDef s d = modify $ \rs -> rs { rsDefs = Map.insert s d $ rsDefs rs }
 >
@@ -369,6 +375,7 @@ repetitive.
 >     FunExport f -> S.Fun f
 >     ConExport i ci -> S.Constr i ci
 >     IndExport i -> S.Ind i
+>     FixExport f -> S.Fun (fxFun f)
 > 
 > narrowExports :: MonadResolver m => [Export] -> m Export
 > narrowExports [] = throwError UnknownReference
@@ -457,22 +464,22 @@ repetitive.
 > decreasingIndices :: [String] -> [String] -> [Int]
 > decreasingIndices args dec = sort $ catMaybes $ map (`elemIndex` args) dec
 >
-> createFunOrFix :: MonadResolver m => [String] -> Function -> m Function
+> createFunOrFix :: MonadResolver m => [String] -> Function -> m (Either Fixpoint Function)
 > createFunOrFix args f = do
 >     dec <- fmap (decreasingIndices args . Set.toList) <$> gets rsDecreasing
 >     case dec of
->         Just (x:xs) -> return f
+>         Just (x:xs) -> return $ Left $ Fixpoint f x
 >         Just [] -> throwError InvalidFixpoint
->         _ -> return f
+>         _ -> return $ Right f
 >
-> resolveFun :: MonadResolver m => ParseFun -> m S.Function
+> resolveFun :: MonadResolver m => ParseFun -> m DefinitionContent
 > resolveFun f = do
 >     fts <- resolveTerm (pfType f)
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
->     rec f' <- withNoDecreasing $ withFun f $ emitFun (pfName f) f' >> do
+>     rec f' <- withNoDecreasing $ withFun f $ emitFunOrFix (pfName f) f' >> do
 >          fb <- withSizedVars Original (pfArity f) $ resolveTerm (pfBody f)
 >          createFunOrFix (pfArity f) $ Function (pfName f) ats rt fb
->     return f'
+>     return $ either FixDef FunDef f'
 >
 > collectFunArgs :: [String] -> S.Term -> Either ResolveError ([S.Term], S.Term)
 > collectFunArgs [] t = return $ ([], t)
@@ -502,7 +509,7 @@ repetitive.
 > 
 > resolveDef :: MonadResolver m => ParseDef -> m Definition
 > resolveDef d = do
->     dc <- either (fmap Left . resolveInd) (fmap Right . resolveFun) d
+>     dc <- either (fmap IndDef . resolveInd) resolveFun d
 >     let def = Definition Public dc
 >     emitDef (dName def) def
 >     return def

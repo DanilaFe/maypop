@@ -69,12 +69,22 @@ is public or private; this will affect whether or not it can be exported by a mo
 > isPublic Private = False
 
 Let's also define a (Haskell) data type that can hold either a (Maypop) data type
-definition or a function definition. This data type will also include visibility
+definition or a (possibly fixpoint) function definition. This data type will also include visibility
 information. 
 
+> data DefinitionContent 
+>     = IndDef Inductive
+>     | FunDef Function
+>     | FixDef Fixpoint
+>
+> asFunction :: DefinitionContent -> Maybe Function
+> asFunction (FixDef f) = Just $ fxFun f
+> asFunction (FunDef f) = Just f
+> asFunction _ = Nothing
+>
 > data Definition = Definition
 >     { dVisibility :: Visibility
->     , dContent :: Either Inductive Function
+>     , dContent :: DefinitionContent
 >     }
 
 Both types of definitions have names; however, they are part of their
@@ -82,7 +92,9 @@ own data structure. We can define a convenience function to extract
 the name of a definition, be it a function or an inductive definition.
 
 > dName :: Definition -> String
-> dName = either iName fName . dContent
+> dName Definition{dContent=IndDef i} = iName i
+> dName Definition{dContent=FunDef f} = fName f
+> dName Definition{dContent=FixDef f} = fName (fxFun f)
 
 Finally, let's define a representation for a module:
 
@@ -144,6 +156,7 @@ of the same definition into one.
 >     = IndExport Inductive
 >     | ConExport Inductive Int
 >     | FunExport Function
+>     | FixExport Fixpoint
 
 With that, we go ahead and define our two-map `GlobalScope`.
 
@@ -223,12 +236,13 @@ exports.
 >         processImport (n, it) = do
 >             def <- maybe (throwError NotExported) return $ Map.lookup n defs
 >             case (it, dContent def) of
->                 (Open, Left i) -> do
+>                 (Open, IndDef i) -> do
 >                     tellExport n (IndExport i)
 >                     mapMWithIndex (tellCon i) $ iConstructors i
->                 (Closed, Left i) -> tellExport n (IndExport i)
->                 (Open, Right f) -> throwError BadOpenImport
->                 (Closed, Right f) -> tellExport n (FunExport f)
+>                 (Closed, IndDef i) -> tellExport n (IndExport i)
+>                 (Closed, FunDef f) -> tellExport n (FunExport f)
+>                 (Closed, FixDef f) -> tellExport n (FixExport f)
+>                 (Open, _) -> throwError BadOpenImport
 
 For the above, we use a little utility, `mapMWithIndex`, which is a version
 of [`mapM`](https://hackage.haskell.org/package/base-4.15.0.0/docs/Prelude.html#v:mapM)
