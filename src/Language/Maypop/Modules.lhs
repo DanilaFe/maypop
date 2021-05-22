@@ -8,7 +8,6 @@ In this (Haskell) module, we'll define (Maypop) modules.
 > import Data.List
 > import Data.Maybe
 > import qualified Data.Map as Map
-> import Algebra.Graph.AdjacencyMap
 
 We'll go for a module system similar to that of Haskell. In particular:
 
