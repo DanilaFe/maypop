@@ -375,7 +375,7 @@ repetitive.
 >     FunExport f -> S.Fun f
 >     ConExport i ci -> S.Constr i ci
 >     IndExport i -> S.Ind i
->     FixExport f -> S.Fun (fxFun f)
+>     FixExport f -> S.Fix f
 > 
 > narrowExports :: MonadResolver m => [Export] -> m Export
 > narrowExports [] = throwError UnknownReference

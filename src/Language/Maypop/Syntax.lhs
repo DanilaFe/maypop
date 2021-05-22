@@ -200,6 +200,7 @@ because `Cons x l` is bigger than `l`. We will encode this in a new data type, `
 >     { fxFun :: Function
 >     , fxDecArg :: Int
 >     }
+>     deriving (Eq, Show)
 
 Here, `fxFun` refers to all the usual function-related data, and `fxDecArg` gives the number
 (0-indexed from the left of the parameter list) of the argument that must always be "shrinking".
@@ -253,6 +254,7 @@ for the second constructor).
 > data ParamTerm a
 >     = Ref Int
 >     | Fun Function
+>     | Fix Fixpoint
 >     | Param a
 >     | Abs (ParamTerm a) (ParamTerm a)
 >     | App (ParamTerm a) (ParamTerm a)
@@ -471,6 +473,7 @@ And now, the pretty printer itself.
 >         paren b s = if b then "(" ++ s ++ ")" else s
 >         prettyM n (Ref i) = nth i <$> ask >>= maybe (return $ "??" ++ show i) return
 >         prettyM n (Fun f) = return $ fName f
+>         prettyM n (Fix f) = return $ fName $ fxFun f
 >         prettyM n (Param p) = return $ show p
 >         prettyM n (Abs t1 t2) = paren (n >= 10) <$> do
 >             newName <- popName

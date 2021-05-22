@@ -41,3 +41,19 @@ plus_comm n m =
     | S mm -> replace Nat (\(p : Nat). Eq Nat p (S (plus mm n))) (S (plus n mm)) (plus n (S mm)) (plus_S n mm) (cong Nat Nat S (plus n mm) (plus mm n) (plus_comm n mm))
     end
 end
+
+times : Nat -> Nat -> Nat where
+times n m =
+    match n as _ in Nat _ return Nat with
+    | O -> O
+    | S nn -> plus m (times nn m)
+    end
+end
+
+times_O_n : forall (n : Nat). Eq Nat (times O n) O where
+times_O_n n = Refl Nat O
+end
+
+times_n_S : forall (n : Nat). Eq Nat (times (S O) n) n where
+times_n_S n = plus_n_O n
+end
