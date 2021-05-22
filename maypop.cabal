@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 38b2a967b827344b5fcfd0b59a03a286f095e668fa00c43a4f860a98326d8640
+-- hash: f6b33cbc0873da336accf09cf4465a43bd60016187a0de31ef80d442089fa059
 
 name:           maypop
 version:        0.1.0.0
@@ -42,9 +42,9 @@ library
   hs-source-dirs:
       src
   build-depends:
-      algebraic-graphs >=0.5 && <0.6
-    , base >=4.7 && <5
+      base >=4.7 && <5
     , containers >=0.6.2.1 && <0.7
+    , logict >=0.7.1.0 && <0.8
     , mtl >=2.2.2 && <3
     , parsec >=3.1.14.0 && <3.2
   default-language: Haskell2010
@@ -58,9 +58,9 @@ executable maypop-exe
       app
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      algebraic-graphs >=0.5 && <0.6
-    , base >=4.7 && <5
+      base >=4.7 && <5
     , containers >=0.6.2.1 && <0.7
+    , logict >=0.7.1.0 && <0.8
     , maypop
     , mtl >=2.2.2 && <3
     , parsec >=3.1.14.0 && <3.2
@@ -77,9 +77,9 @@ test-suite maypop-test
   build-depends:
       HUnit >=1.6.0.0 && <2
     , QuickCheck >=2.14.2 && <3
-    , algebraic-graphs >=0.5 && <0.6
     , base >=4.7 && <5
     , containers >=0.6.2.1 && <0.7
+    , logict >=0.7.1.0 && <0.8
     , maypop
     , mtl >=2.2.2 && <3
     , parsec >=3.1.14.0 && <3.2

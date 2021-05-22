@@ -14,6 +14,7 @@ used for type inference.
 > import Language.Maypop.Syntax hiding (occurs, substitute)
 > import Control.Monad.State
 > import Control.Monad.Except
+> import Control.Monad.Logic
 > import Control.Applicative
 > import qualified Data.Map as Map
 > import qualified Data.Set as Set
@@ -78,15 +79,18 @@ of pairs) of unification bindings to our final value.
 > substituteAll m v = foldr (uncurry substitute) v m
 
 Next, let's define a monad transformer satisfying `MonadUnify`, which we'll call `UnifyT`. This will be a simple
-wrapper around the `StateT` and `ExceptT` monads; however, __it will not
-implement `MonadState` or `MonadError`__, since we want to keep unification state separate
+wrapper around the `StateT` monad; however, __it will not
+implement `MonadState`__, since we want to keep unification state separate
 from any other state the API user would want to create. We can use `deriving` to
-automatically compute the `Functor`, `Applicative`, and `Monad` instances,
+automatically compute the `Functor`, `Applicative`, `Monad` and other instances,
 so the bulk of our work will be implementing the `MonadUnify` methods.
 
 > newtype UnifyT k v m a
 >     = MkUnifyT { unwrapUnifyT :: StateT (UnificationState k v) m a }
->     deriving (Functor, Applicative, Monad, Alternative, MonadPlus)
+>     deriving (Functor, Applicative, Monad, Alternative, MonadTrans, MonadPlus)
+>
+> instance (MonadPlus m, MonadLogic m) => MonadLogic (UnifyT k v m) where
+>     msplit m = MkUnifyT $ fmap (second MkUnifyT <$>) $ msplit (unwrapUnifyT m)
 >
 > runUnifyT :: (Monad m, Infinite k, Unifiable k v) => UnifyT k v m a -> m a
 > runUnifyT u = fst <$> runStateT (unwrapUnifyT u) emptyState
