@@ -14,6 +14,7 @@ used for type inference.
 > import Language.Maypop.Syntax hiding (occurs, substitute)
 > import Control.Monad.State
 > import Control.Monad.Except
+> import Control.Monad.Reader
 > import Control.Monad.Logic
 > import Control.Applicative
 > import qualified Data.Map as Map
@@ -91,6 +92,10 @@ so the bulk of our work will be implementing the `MonadUnify` methods.
 >
 > instance (MonadPlus m, MonadLogic m) => MonadLogic (UnifyT k v m) where
 >     msplit m = MkUnifyT $ fmap (second MkUnifyT <$>) $ msplit (unwrapUnifyT m)
+>
+> instance MonadReader r m => MonadReader r (UnifyT k v m) where
+>     ask = lift ask
+>     local x m = MkUnifyT $ mapStateT (local x) $ unwrapUnifyT m
 >
 > runUnifyT :: (Monad m, Infinite k, Unifiable k v) => UnifyT k v m a -> m a
 > runUnifyT u = fst <$> runStateT (unwrapUnifyT u) emptyState
