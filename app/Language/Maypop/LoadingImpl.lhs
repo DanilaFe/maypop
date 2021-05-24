@@ -16,7 +16,6 @@ friends.
 > import Control.Exception
 > import Data.List
 > import Data.Bifunctor
-> import qualified Data.Map as Map
 
 The easiest thing to start with is the `MonadModulePath` type class.
 We really need something that's like a `MonadReader [String]`, where
@@ -68,9 +67,9 @@ we'll simply parse the file anew each time.
 > parseD m s = first (ParseError) $ parseDefs m s
 
 > instance MonadModule IO where
->     moduleHeader s = handle (\(e :: IOException) -> return $ Left NoSuchFile)
+>     moduleHeader s = handle (\(_ :: IOException) -> return $ Left NoSuchFile)
 >         $ fmap ((,) s) <$> parseH' s <$> readFile s
->     moduleContent s = handle (\(e :: IOException) -> return $ Left NoSuchFile)
+>     moduleContent s = handle (\(_ :: IOException) -> return $ Left NoSuchFile)
 >         $ parseD s <$> readFile s
 
 The `IO` monad sits at the bottom of a monad transformer stack. However, the `MonadModule`

@@ -6,8 +6,6 @@ In this module, we'll cover evaluating Maypop terms.
 > import Data.Bifunctor
 > import Data.Maybe
 > import Data.Void
-> import Data.List
-> import Debug.Trace
 
 We'll go with normal-order evaluation. Lazy evaluation would
 require some degree of sharing, which would be a little
@@ -43,7 +41,7 @@ use their contents.
 >     let l' = eval l
 >     eval $ substitute 0 l' r -- Zeta reduction
 > eval (Prod l r) = Prod (eval l) (eval r)
-> eval c@(Case t i tt ts) = fromMaybe (Case (eval t) i (eval tt) (map eval ts)) $ do -- Iota reduction (case)
+> eval (Case t i tt ts) = fromMaybe (Case (eval t) i (eval tt) (map eval ts)) $ do -- Iota reduction (case)
 >     ((i', ci), xs) <- collectConstrApps (eval t)
 >     guard $ i == i'
 >     b <- nth ci ts
@@ -109,7 +107,7 @@ the chain of applications, but this time evaluating the arguments.
 
 > evalApps :: (ParamTerm a, [ParamTerm a]) -> ParamTerm a
 > evalApps (Abs _ b, t:ts) = evalApps (eval $ substitute 0 t b, ts) -- Beta reduction
-> evalApps (ft@(Fix f), ts)
+> evalApps (Fix f, ts)
 >     | Just t <- nth (fxDecArg f) ts
 >     , Just t' <- fmap rebuildConstrApps $ collectConstrApps $ eval t =
 >         evalApps $ (expandFunction (fxFun f), replaceNth (fxDecArg f) t' ts) -- Iota reduction (fixpoint)
@@ -117,7 +115,7 @@ the chain of applications, but this time evaluating the arguments.
 >
 > replaceNth :: Int -> a -> [a] -> [a]
 > replaceNth _ _ [] = []
-> replaceNth 0 x' (x:xs) = x' : xs
+> replaceNth 0 x' (_:xs) = x' : xs
 > replaceNth n x' (x:xs) = x : replaceNth (n-1) x' xs
 > 
 > collectConstrApps :: ParamTerm a -> Maybe ((Inductive, Int), [ParamTerm a])

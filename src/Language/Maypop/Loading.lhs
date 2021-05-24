@@ -3,20 +3,15 @@ and into the interpreter.
 
 > {-# LANGUAGE FlexibleContexts #-}
 > module Language.Maypop.Loading where
-> import Language.Maypop.Syntax
 > import Language.Maypop.Modules
 > import Language.Maypop.Checking
 > import Language.Maypop.Parser hiding (ImportError)
 > import Control.Monad.Except
 > import Control.Monad.Reader
-> import Control.Monad.State
-> import Control.Exception hiding (TypeError)
 > import Data.Bool
 > import Data.Bifunctor
 > import Data.Either
-> import Data.List
 > import Text.Parsec
-> import qualified Data.Map as Map
 
 Now that we know what constitutes a module, we should try get a mechanism
 working that will dynamically import and explore various modules. For instance,

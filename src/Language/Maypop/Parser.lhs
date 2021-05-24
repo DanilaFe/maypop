@@ -19,12 +19,9 @@ repetitive.
 > import Control.Monad.Except
 > import Text.Parsec
 > import Text.Parsec.Token
-> import Text.Parsec.Char
 > import Text.Parsec.Expr
-> import Text.Parsec.Combinator
 > import qualified Data.Map as Map
 > import qualified Data.Set as Set
-> import Data.Foldable
 > import Data.Char
 > import Data.Bifunctor
 > import Data.List
@@ -110,7 +107,7 @@ repetitive.
 >      else fail "Identifier is not uppercase!"
 >     where
 >         upperString [] = False
->         upperString (x:xs) = isUpper x
+>         upperString (x:_) = isUpper x
 >
 > modulePath :: Parser Symbol
 > modulePath = MkSymbol . reverse <$> sepBy1 upperIdent (try $ dot genParser) 
@@ -380,7 +377,7 @@ repetitive.
 > narrowExports :: MonadResolver m => [Export] -> m Export
 > narrowExports [] = throwError UnknownReference
 > narrowExports [x] = return x
-> narrowExports xs = throwError AmbiguousReference
+> narrowExports _ = throwError AmbiguousReference
 >
 > smallerParams :: [Maybe (String, VarSize)] -> Set.Set String
 > smallerParams mps = Set.fromList $ catMaybes $ map (>>=(varParent . snd)) mps
@@ -468,7 +465,7 @@ repetitive.
 > createFunOrFix args f = do
 >     dec <- fmap (decreasingIndices args . Set.toList) <$> gets rsDecreasing
 >     case dec of
->         Just (x:xs) -> return $ Left $ Fixpoint f x
+>         Just (x:_) -> return $ Left $ Fixpoint f x
 >         Just [] -> throwError InvalidFixpoint
 >         _ -> return $ Right f
 >
@@ -484,7 +481,7 @@ repetitive.
 > collectFunArgs :: [String] -> S.Term -> Either ResolveError ([S.Term], S.Term)
 > collectFunArgs [] t = return $ ([], t)
 > collectFunArgs (_:xs) (S.Prod l r) = first (l:) <$> collectFunArgs xs r
-> collectFunArgs l _ = throwError InvalidArity
+> collectFunArgs _ _ = throwError InvalidArity
 >
 > resolveParams :: MonadResolver m => [ParseParam] -> m [S.Term]
 > resolveParams = foldr (\(x, t) m -> liftA2 (:) (resolveTerm t) (withVar x m)) (return [])

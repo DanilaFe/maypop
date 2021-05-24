@@ -15,7 +15,6 @@ Here, I'll define what a Maypop "term" is.
 > import Control.Monad.Writer
 > import Data.List
 > import Data.Void
-> import Data.Maybe
 > import Data.Bifunctor
 > import qualified Data.Set as Set
 >
@@ -471,10 +470,10 @@ And now, the pretty printer itself.
 >             sr <- extendNames names rm
 >             return $ "∀(" ++ intercalate " " names ++ " : " ++ st ++ ")." ++ sr
 >         paren b s = if b then "(" ++ s ++ ")" else s
->         prettyM n (Ref i) = nth i <$> ask >>= maybe (return $ "??" ++ show i) return
->         prettyM n (Fun f) = return $ fName f
->         prettyM n (Fix f) = return $ fName $ fxFun f
->         prettyM n (Param p) = return $ show p
+>         prettyM _ (Ref i) = nth i <$> ask >>= maybe (return $ "??" ++ show i) return
+>         prettyM _ (Fun f) = return $ fName f
+>         prettyM _ (Fix f) = return $ fName $ fxFun f
+>         prettyM _ (Param p) = return $ show p
 >         prettyM n (Abs t1 t2) = paren (n >= 10) <$> do
 >             newName <- popName
 >             st1 <- prettyM 0 t1
@@ -499,9 +498,9 @@ And now, the pretty printer itself.
 >             st1 <- prettyM 0 t1
 >             st2 <- extendNames [newName] $ prettyM 0 t2
 >             return $ "let " ++ newName ++ " = " ++ st1 ++ " in " ++ st2
->         prettyM n (Sort u) = return $ show u
->         prettyM n (Constr i ci) = return $ maybe "??" cName $ nth ci (iConstructors i)
->         prettyM n (Ind i) = return $ iName i
+>         prettyM _ (Sort u) = return $ show u
+>         prettyM _ (Constr i ci) = return $ maybe "??" cName $ nth ci (iConstructors i)
+>         prettyM _ (Ind i) = return $ iName i
 >         prettyM n (Case t i tt ts) = paren (n >= 10) <$> do
 >             st <- prettyM 0 t
 >             termName <- popName

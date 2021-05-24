@@ -13,16 +13,13 @@ used for type inference.
 > import Language.Maypop.Eval
 > import Language.Maypop.Syntax hiding (occurs, substitute)
 > import Control.Monad.State
-> import Control.Monad.Except
 > import Control.Monad.Reader
 > import Control.Monad.Logic
 > import Control.Applicative
 > import qualified Data.Map as Map
 > import qualified Data.Set as Set
-> import Data.Tuple
 > import Data.Maybe
 > import Data.Bifunctor
-> import Data.Functor.Identity
 
 We'll define an MTL-style typeclass that encapsulates unification functionality.
 Since
