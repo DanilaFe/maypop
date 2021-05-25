@@ -6,10 +6,12 @@ Let's work on type inference a little.
 > {-# LANGUAGE FlexibleInstances #-}
 > {-# LANGUAGE UndecidableInstances #-}
 > {-# LANGUAGE MonoLocalBinds #-}
+> {-# LANGUAGE MultiParamTypeClasses #-}
 > module Language.Maypop.Checking where
 > import Language.Maypop.Syntax
 > import Language.Maypop.Eval
 > import Language.Maypop.Modules
+> import Language.Maypop.Unification hiding (substitute)
 > import Control.Monad.Reader
 > import Control.Monad.Except
 > import Data.Bifunctor
@@ -39,6 +41,14 @@ come up.
 >     | UnknownConstructor
 >     deriving Show
 
+{{< todo >}} Explain this {{< /todo >}}
+
+> instance Semigroup TypeError where
+>     l <> _ = l
+>
+> instance Monoid TypeError where
+>     mempty = TypeError
+
 It is also helpful to write a function that ensures a boolean condition
 is met, failing if it isn't. Aside from the condition, we need to
 provide information about what actually went wrong, in the form
@@ -49,27 +59,27 @@ of a `TypeError`:
 
 All of these `Monad` constraints that we keep sticking onto our functions
 are going to start seeming repetitive. Instead of dealing with that, we
-can define a trivial type class instance, `MonadInfer`, which implies
-all of the other common constraints.
+can define a trivial type class instance, `MonadInfer k`, which implies
+all of the other common constraints. The `k` in this definition is the type
+of parameters that our terms are parameterized by.
 
-> class (MonadReader [Term] m, MonadError TypeError m) => MonadInfer m where
-> instance (MonadReader [Term] m, MonadError TypeError m) => MonadInfer m where
+> class (MonadReader [ParamTerm k] m, MonadError TypeError m, MonadUnify k (ParamTerm k) m) => MonadInfer k m where
+> instance (MonadReader [ParamTerm k] m, MonadError TypeError m, MonadUnify k (ParamTerm k) m) => MonadInfer k m where
 
 Finally, on to the type inference function. We use the `MonadReader`
 typeclass to require read-only access to the local environment \\(\\Gamma\\).
 
-> infer :: MonadInfer m => Term -> m Term
+> infer :: MonadInfer k m => ParamTerm k -> m (ParamTerm k)
 > infer (Ref n) = nth n <$> ask >>= maybe (throwError (FreeVariable n)) return
-> infer (Fun f) = return $ fFullType f
-> infer (Fix f) = return $ fFullType $ fxFun f
-> infer (Param p) = absurd p
+> infer (Fun f) = return $ parameterize $ fFullType f
+> infer (Fix f) = return $ parameterize $ fFullType $ fxFun f
+> infer (Param p) = undefined -- TODO
 > infer (Abs t b) = Prod t <$> extend t (infer b)
 > infer (App f a) = do
 >     (ta, tb) <- inferP f
 >     targ <- infer a
->     if eval ta == eval targ
->      then return (substitute 0 a tb)
->      else throwError $ TypeMismatch (eval ta) (eval targ)
+>     unify (eval ta) (eval targ)
+>     reify $ substitute 0 a tb
 > infer (Let l i) = infer l >>= flip extend (infer i)
 > infer (Prod a b) = extend' a $ \ua -> inferS b >>= \ub -> return $ Sort $
 >     case ub of
@@ -77,14 +87,14 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >         t -> joinS ua t
 > infer (Sort u) = return $ Sort $ nextSort u
 > infer (Constr i ci) = withConstr $
->     \c -> return $ foldr Prod (cReturn c) (iParams i ++ cParams c)
+>     \c -> return $ foldr Prod (parameterize $ cReturn c) (parameterizeAll $ iParams i ++ cParams c)
 >     where
 >         mConstr = nth ci $ iConstructors i
 >         withConstr f = maybe (throwError UnknownConstructor) f mConstr
 >         cParamRefs c = map (+length (cParams c)) [0..length (iParams i) -1]
 >         cIndParams c = map Ref $ reverse $ cParamRefs c
 >         cReturn c = foldl App (Ind i) $ cIndParams c ++ cIndices c
-> infer (Ind i) = return $ foldr Prod (Sort $ iSort i) $ (iParams i ++ iArity i)
+> infer (Ind i) = return $ foldr Prod (Sort $ iSort i) $ (parameterizeAll $ iParams i ++ iArity i)
 > infer (Case t i tt ts) = do
 >     (i', is) <- inferI t
 >     guardE TypeError $ i == i'
@@ -92,23 +102,28 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >     let subPs off = substituteMany off (map (offsetFree off) ps)
 >     let tType = foldl App (Ind i) is
 >     let constr (ci,c) b = do
->          let cps = zipWith subPs [0..] $ cParams c
->          let inds' = map (subPs $ length cps) $ cIndices c
+>          let cps = zipWith subPs [0..] $ parameterizeAll $ cParams c
+>          let inds' = map (subPs $ length cps) $ parameterizeAll $ cIndices c
 >          let rcps = map (Ref . negate) $ [1..length cps]
 >          let expt = foldl App (Constr i ci) $ rcps
 >          let et = substituteMany 0 (expt:inds') tt
 >          at <- substituteMany 0 rcps <$> (extendAll cps $ infer b)
->          guardE (TypeMismatch (eval at) (eval et)) $ eval at == eval et
->     let ar = zipWith (\n -> offsetFree 1 . subPs n) [0..] $ iArity i
+>          unify (eval at) (eval et)
+>     let ar = zipWith (\n -> offsetFree 1 . subPs n) [0..] $ parameterizeAll $ iArity i
 >     extendAll (tType: ar) $ inferS tt
 >     zipWithM constr (zip [0..] $ iConstructors i) ts
 >     return $ substituteMany 0 (t:inds) tt
+>
+> type InferE a = UnifyEqT Term (ExceptT TypeError (Reader [Term])) a
+>
+> runInferE :: [Term] -> InferE a -> Either TypeError a
+> runInferE ts m = runReader (runExceptT $ runUnifyEqT m) ts
 >
 > runInfer :: Term -> Either TypeError Term
 > runInfer = runInfer' []
 
 > runInfer' :: [Term] -> Term -> Either TypeError Term
-> runInfer' ts t = runReader (runExceptT $ infer t) ts
+> runInfer' ts = runInferE ts . infer
 
 There are a few utility functions in the above definitions; let's take a look
 at all of them in turn.  First up is `inferS`. We need this function because
@@ -119,13 +134,13 @@ such as \\(\\Pi\\). Thus, we'll define a way to "cast" a term into a valid sort.
 be used to discard terms such as \\(\\Pi(\\lambda \\text{Prop}.0),\\text{Prop}\\), which have non-types in a
 place where a type is needed.
 
-> intoSort :: MonadError TypeError m => Term -> m Sort
+> intoSort :: MonadError TypeError m => ParamTerm k -> m Sort
 > intoSort (Sort u) = return u
 > intoSort _ = throwError NotSort
 
 We can use this to define a specialized version of `infer`:
 
-> inferS :: MonadInfer m => Term -> m Sort
+> inferS :: MonadInfer k m => ParamTerm k -> m Sort
 > inferS t = eval <$> infer t >>= intoSort
 
 A similar casting function to `intoSort` is `intoProduct`, which helps
@@ -133,13 +148,13 @@ us require that a term is a dependent product (this is used for the application 
 We return the two terms composing a product type rather than returning a `Term`, which
 helps the type system "remember" that this is not just any term that passed our inspection.
 
-> intoProduct :: MonadError TypeError m => Term -> m (Term, Term)
+> intoProduct :: MonadError TypeError m => ParamTerm k -> m (ParamTerm k, ParamTerm k)
 > intoProduct (Prod a b) = return (a, b)
 > intoProduct _ = throwError NotProduct
 
 Once again, we define a specailized version of `infer` for products:
 
-> inferP :: MonadInfer m => Term -> m (Term, Term)
+> inferP :: MonadInfer k m => ParamTerm k -> m (ParamTerm k, ParamTerm k)
 > inferP t = eval <$> infer t >>= intoProduct
 
 Just as we may want to cast a data type into a product, we may also want to cast
@@ -148,7 +163,7 @@ are a little trickier here, since fully applied inductive type constructors
 are represented as a chain of `App` nodes. We thus define a function to turn this
 tree into a list:
 
-> collectApps :: MonadError TypeError m => Term -> m (Inductive, [Term])
+> collectApps :: MonadError TypeError m => ParamTerm k -> m (Inductive, [ParamTerm k])
 > collectApps t = second reverse <$> collect t
 >     where
 >         collect (App l r) = second (r:) <$> collect l
@@ -159,7 +174,7 @@ Unlike the previous two "casts", we need to perform type inference to ensure
 that a type constructor is fully applied and well formed. Thus, we forego the `intoInductive`
 function, and jump straight into `inferI`.
 
-> inferI :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m (Inductive, [Term])
+> inferI :: MonadInfer k m => ParamTerm k -> m (Inductive, [ParamTerm k])
 > inferI t = eval <$> infer t >>= \tt -> inferS tt >> collectApps tt
 
 Next, we have to be careful about the rules of the Calculus of Constructions. We
@@ -170,13 +185,13 @@ Furthermore, because types in the environment can refer to terms via DeBrujin
 indices, we must be careful to preserve these references inside the body of a lambda
 abstraction, leading us to use `offsetFree`. Thus, extending the environment looks like this:
 
-> extend :: MonadInfer m => Term -> m a -> m a
+> extend :: MonadInfer k m => ParamTerm k -> m a -> m a
 > extend t m = extend' t $ const m
 >
-> extend' :: MonadInfer m => Term -> (Sort -> m a) -> m a
+> extend' :: MonadInfer k m => ParamTerm k -> (Sort -> m a) -> m a
 > extend' t f = inferS t >>= \u -> local (map (offsetFree 1) . (t:)) (f u)
 >
-> extendAll :: MonadInfer m => [Term] -> m a -> m a
+> extendAll :: MonadInfer k m => [ParamTerm k] -> m a -> m a
 > extendAll = flip (foldr extend)
 
 The Calculus of Constructions has cumulativity, and one of the rules for product
@@ -196,11 +211,11 @@ a total order, but we do have a join semilattice.
 
 We should also write some code to perform type checking on entire modules.
 
-> checkFunction :: MonadInfer m => Function -> m Term
+> checkFunction :: MonadInfer Void m => Function -> m Term
 > checkFunction f = do
 >     ft <- extendAll (fArity f) $ infer $ fBody f
 >     guardE (TypeMismatch (eval ft) (eval (fType f))) $ eval ft == eval (fType f)
 >     return ft
 >
 > checkModule :: Module -> Either TypeError ()
-> checkModule m = runReader (runExceptT $ mapM_ checkFunction $ catMaybes $ map (asFunction . dContent) $ Map.elems $ mDefinitions m) []
+> checkModule m = runInferE [] $ mapM_ checkFunction $ catMaybes $ map (asFunction . dContent) $ Map.elems $ mDefinitions m

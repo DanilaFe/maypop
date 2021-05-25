@@ -16,6 +16,7 @@ used for type inference.
 > import Control.Monad.Reader
 > import Control.Monad.Writer
 > import Control.Monad.Logic
+> import Control.Monad.Except
 > import Control.Applicative
 > import qualified Data.Map as Map
 > import qualified Data.Set as Set
@@ -87,7 +88,7 @@ so the bulk of our work will be implementing the `MonadUnify` methods.
 
 > newtype UnifyT k v m a
 >     = MkUnifyT { unwrapUnifyT :: StateT (UnificationState k v) m a }
->     deriving (Functor, Applicative, Monad, Alternative, MonadTrans, MonadPlus, MonadReader r, MonadWriter w)
+>     deriving (Functor, Applicative, Monad, Alternative, MonadTrans, MonadPlus, MonadReader r, MonadWriter w, MonadError e)
 
 For some reason, Haskell's `GeneralizedNewtypeDeriving` fails to compute the `MonadLogic`
 instance for `UnifyT`. We write it manually, instead.
@@ -222,7 +223,7 @@ no new bindings can ever be introduced; it is thus possible to represent
 a "trivial unification" monad transformer as follows:
 
 > newtype UnifyEqT v m a = MkUnifyEqT { runUnifyEqT :: m a }
->     deriving (Functor, Applicative, Monad, MonadReader r, MonadWriter w, MonadState s, Alternative, MonadPlus)
+>     deriving (Functor, Applicative, Monad, MonadReader r, MonadWriter w, MonadState s, MonadError e, Alternative, MonadPlus)
 
 We can define a very boring instance of `MonadUnify` for this data type:
 

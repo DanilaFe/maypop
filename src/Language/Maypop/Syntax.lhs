@@ -267,6 +267,17 @@ for the second constructor).
 >
 > type Term = ParamTerm Void
 
+If we have a term without parameters (`Term`), we can always
+interpret it as a term that may contain parameters. We can always
+trivially translate from `Void` into any other type `a` using
+the `abusrd` function, so this re-interpretation is define as follows:
+
+> parameterize :: Term -> ParamTerm a
+> parameterize = fmap absurd
+>
+> parameterizeAll :: [Term] -> [ParamTerm a]
+> parameterizeAll = map parameterize
+
 For convenience, we combine the references to the various
 sorts (\\(\\text{Prop}\\) and \\(\\text{Type}_n\\)) into a data type,
 `Sort`:
