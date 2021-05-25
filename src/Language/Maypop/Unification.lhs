@@ -14,12 +14,14 @@ used for type inference.
 > import Language.Maypop.Syntax hiding (occurs, substitute)
 > import Control.Monad.State
 > import Control.Monad.Reader
+> import Control.Monad.Writer
 > import Control.Monad.Logic
 > import Control.Applicative
 > import qualified Data.Map as Map
 > import qualified Data.Set as Set
 > import Data.Maybe
 > import Data.Bifunctor
+> import Data.Void
 
 We'll define an MTL-style typeclass that encapsulates unification functionality.
 Since
@@ -32,7 +34,7 @@ type of the stuff bound to the unification variables `v`. We also require the
 unification variables to be infinite (via the `Infinite` typeclass from `InfiniteList`), and for the values
 being unified to be `Unifiable`.
 
-> class (Unifiable k v, Infinite k, MonadPlus m) => MonadUnify k v m | m -> k, m -> v where
+> class (Unifiable k v, MonadPlus m) => MonadUnify k v m | m -> k, m -> v where
 >     fresh :: m k
 >     bind :: k -> v -> m v
 >     merge :: k -> k -> m ()
@@ -78,22 +80,33 @@ of pairs) of unification bindings to our final value.
 
 Next, let's define a monad transformer satisfying `MonadUnify`, which we'll call `UnifyT`. This will be a simple
 wrapper around the `StateT` monad; however, __it will not
-implement `MonadState`__, since we want to keep unification state separate
+forward the `MonadState`__ API, since we want to keep unification state separate
 from any other state the API user would want to create. We can use `deriving` to
 automatically compute the `Functor`, `Applicative`, `Monad` and other instances,
 so the bulk of our work will be implementing the `MonadUnify` methods.
 
 > newtype UnifyT k v m a
 >     = MkUnifyT { unwrapUnifyT :: StateT (UnificationState k v) m a }
->     deriving (Functor, Applicative, Monad, Alternative, MonadTrans, MonadPlus)
->
+>     deriving (Functor, Applicative, Monad, Alternative, MonadTrans, MonadPlus, MonadReader r, MonadWriter w)
+
+For some reason, Haskell's `GeneralizedNewtypeDeriving` fails to compute the `MonadLogic`
+instance for `UnifyT`. We write it manually, instead.
+
 > instance (MonadPlus m, MonadLogic m) => MonadLogic (UnifyT k v m) where
 >     msplit m = MkUnifyT $ fmap (second MkUnifyT <$>) $ msplit (unwrapUnifyT m)
->
-> instance MonadReader r m => MonadReader r (UnifyT k v m) where
->     ask = lift ask
->     local x m = MkUnifyT $ mapStateT (local x) $ unwrapUnifyT m
->
+
+Even though we don't expose the `MonadState` class from the underlying `StateT` monad
+in `UnifyT`, we do allow the underlying monad `m` to have `MonadState`. Haskell will
+not derive this instance (because `UnifyT` wraps a `StateT`), but it's straightforward
+to manually define.
+
+> instance MonadState s m => MonadState s (UnifyT k v m) where
+>     get = lift $ get
+>     put x = lift $ put x
+
+Finally, we write a couple of functions to actually run computations inside
+`UnifyT`:
+
 > runUnifyT :: (Monad m, Infinite k, Unifiable k v) => UnifyT k v m a -> m a
 > runUnifyT u = fst <$> runStateT (unwrapUnifyT u) emptyState
 >
@@ -200,13 +213,32 @@ no longer in the "fresh" list):
 > popVar :: UnificationState k v -> (k, UnificationState k v)
 > popVar s = let Cons k ks = sVars s in (k, s { sVars = ks })
 
+So now we have unification with variables. But there's a little discovery
+to be made here: we can actually define a unification monad for things
+that cannot contain variables at all. We represent this absence of keys
+by using `Void` for the type of unification variables. It's pointless
+to keep any kind of state when performing this kind of unification, since
+no new bindings can ever be introduced; it is thus possible to represent
+a "trivial unification" monad transformer as follows:
+
+> newtype UnifyEqT v m a = MkUnifyEqT { runUnifyEqT :: m a }
+>     deriving (Functor, Applicative, Monad, MonadReader r, MonadWriter w, MonadState s, Alternative, MonadPlus)
+
+We can define a very boring instance of `MonadUnify` for this data type:
+
+> instance (Unifiable Void v, MonadPlus m) => MonadUnify Void v (UnifyEqT v m) where
+>     fresh = mzero
+>     bind k _ = absurd k
+>     merge k1 _ = absurd k1
+>     reify v = return v
+
 We now implement unification for our `Term` type. Two terms only unify if they are built
 using the same constructor; thus, we mostly include those cases in our pattern matching.
 For cases like `App`, `Abs`, and `Prod`, two recursive calls to `unify` suffice; however,
 for more complex terms such as `Case`, we have to do testing to ensure that the non-`Term`
 data matches, too.
 
-> instance (Eq k, Infinite k) => Unifiable k (ParamTerm k) where
+> instance Eq k => Unifiable k (ParamTerm k) where
 >     unify t1 t2 = unify' (eval t1) (eval t2)
 >         where
 >             unify' (Ref x1) (Ref x2) | x1 == x2 = return $ Ref x1
