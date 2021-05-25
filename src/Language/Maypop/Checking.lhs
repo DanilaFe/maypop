@@ -3,6 +3,9 @@ Let's work on type inference a little.
 {{< todo >}}Seems like it would make sense to describe each case of Infer here.{{< /todo >}}
 
 > {-# LANGUAGE FlexibleContexts #-}
+> {-# LANGUAGE FlexibleInstances #-}
+> {-# LANGUAGE UndecidableInstances #-}
+> {-# LANGUAGE MonoLocalBinds #-}
 > module Language.Maypop.Checking where
 > import Language.Maypop.Syntax
 > import Language.Maypop.Eval
@@ -44,10 +47,18 @@ of a `TypeError`:
 > guardE :: MonadError te m => te -> Bool -> m ()
 > guardE e = bool (throwError e) (return ())
 
+All of these `Monad` constraints that we keep sticking onto our functions
+are going to start seeming repetitive. Instead of dealing with that, we
+can define a trivial type class instance, `MonadInfer`, which implies
+all of the other common constraints.
+
+> class (MonadReader [Term] m, MonadError TypeError m) => MonadInfer m where
+> instance (MonadReader [Term] m, MonadError TypeError m) => MonadInfer m where
+
 Finally, on to the type inference function. We use the `MonadReader`
 typeclass to require read-only access to the local environment \\(\\Gamma\\).
 
-> infer :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m Term
+> infer :: MonadInfer m => Term -> m Term
 > infer (Ref n) = nth n <$> ask >>= maybe (throwError (FreeVariable n)) return
 > infer (Fun f) = return $ fFullType f
 > infer (Fix f) = return $ fFullType $ fxFun f
@@ -114,7 +125,7 @@ place where a type is needed.
 
 We can use this to define a specialized version of `infer`:
 
-> inferS :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m Sort
+> inferS :: MonadInfer m => Term -> m Sort
 > inferS t = eval <$> infer t >>= intoSort
 
 A similar casting function to `intoSort` is `intoProduct`, which helps
@@ -128,7 +139,7 @@ helps the type system "remember" that this is not just any term that passed our 
 
 Once again, we define a specailized version of `infer` for products:
 
-> inferP :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m (Term, Term)
+> inferP :: MonadInfer m => Term -> m (Term, Term)
 > inferP t = eval <$> infer t >>= intoProduct
 
 Just as we may want to cast a data type into a product, we may also want to cast
@@ -159,13 +170,13 @@ Furthermore, because types in the environment can refer to terms via DeBrujin
 indices, we must be careful to preserve these references inside the body of a lambda
 abstraction, leading us to use `offsetFree`. Thus, extending the environment looks like this:
 
-> extend :: (MonadReader [Term] m, MonadError TypeError m) => Term -> m a -> m a
+> extend :: MonadInfer m => Term -> m a -> m a
 > extend t m = extend' t $ const m
 >
-> extend' :: (MonadReader [Term] m, MonadError TypeError m) => Term -> (Sort -> m a) -> m a
+> extend' :: MonadInfer m => Term -> (Sort -> m a) -> m a
 > extend' t f = inferS t >>= \u -> local (map (offsetFree 1) . (t:)) (f u)
 >
-> extendAll :: (MonadReader [Term] m, MonadError TypeError m) => [Term] -> m a -> m a
+> extendAll :: MonadInfer m => [Term] -> m a -> m a
 > extendAll = flip (foldr extend)
 
 The Calculus of Constructions has cumulativity, and one of the rules for product
@@ -185,7 +196,7 @@ a total order, but we do have a join semilattice.
 
 We should also write some code to perform type checking on entire modules.
 
-> checkFunction :: (MonadReader [Term] m, MonadError TypeError m) => Function -> m Term
+> checkFunction :: MonadInfer m => Function -> m Term
 > checkFunction f = do
 >     ft <- extendAll (fArity f) $ infer $ fBody f
 >     guardE (TypeMismatch (eval ft) (eval (fType f))) $ eval ft == eval (fType f)
