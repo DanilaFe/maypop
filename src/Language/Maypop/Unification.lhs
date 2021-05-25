@@ -105,6 +105,15 @@ to manually define.
 >     get = lift $ get
 >     put x = lift $ put x
 
+Sometimes we want to spin up and throw away a `Writer` monad inside of `UnifyT`.
+For this, we need `WriterT` to propagate `MonadUnify`:
+
+> instance (Monoid w, MonadUnify k v m) => MonadUnify k v (WriterT w m) where
+>     fresh = lift $ fresh
+>     bind k v = lift $ bind k v
+>     merge k1 k2 = lift $ merge k1 k2
+>     reify v = lift $ reify v
+
 Finally, we write a couple of functions to actually run computations inside
 `UnifyT`:
 

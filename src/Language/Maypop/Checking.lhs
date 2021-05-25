@@ -11,9 +11,11 @@ Let's work on type inference a little.
 > import Language.Maypop.Syntax
 > import Language.Maypop.Eval
 > import Language.Maypop.Modules
+> import Language.Maypop.InfiniteList
 > import Language.Maypop.Unification hiding (substitute)
 > import Control.Monad.Reader
 > import Control.Monad.Except
+> import Control.Monad.Writer
 > import Control.Applicative
 > import Data.Bifunctor
 > import Data.Bool
@@ -64,17 +66,30 @@ can define a trivial type class instance, `MonadInfer k`, which implies
 all of the other common constraints. The `k` in this definition is the type
 of parameters that our terms are parameterized by.
 
-> class (MonadReader [ParamTerm k] m, MonadError TypeError m, MonadUnify k (ParamTerm k) m) => MonadInfer k m where
-> instance (MonadReader [ParamTerm k] m, MonadError TypeError m, MonadUnify k (ParamTerm k) m) => MonadInfer k m where
+> class (Ord k, MonadReader (InferEnv k) m, MonadError TypeError m, MonadUnify k (ParamTerm k) m) => MonadInfer k m where
+> instance (Ord k, MonadReader (InferEnv k) m, MonadError TypeError m, MonadUnify k (ParamTerm k) m) => MonadInfer k m where
+
+{{< todo >}}Explain this {{< /todo >}}
+
+> data InferEnv k = InferEnv
+>     { ieRefs :: [ParamTerm k]
+>     , ieParams :: Map.Map k (ParamTerm k)
+>     }
+>
+> pushRef :: ParamTerm k -> InferEnv k -> InferEnv k
+> pushRef t ie = ie { ieRefs = map (offsetFree 1) $ t : ieRefs ie }
+>
+> setParams :: Map.Map k (ParamTerm k) -> InferEnv k -> InferEnv k
+> setParams ps ie = ie { ieParams = ps }
 
 Finally, on to the type inference function. We use the `MonadReader`
 typeclass to require read-only access to the local environment \\(\\Gamma\\).
 
 > infer :: MonadInfer k m => ParamTerm k -> m (ParamTerm k)
-> infer (Ref n) = nth n <$> ask >>= maybe (throwError (FreeVariable n)) return
+> infer (Ref n) = (nth n . ieRefs) <$> ask >>= maybe (throwError (FreeVariable n)) return
 > infer (Fun f) = return $ parameterize $ fFullType f
 > infer (Fix f) = return $ parameterize $ fFullType $ fxFun f
-> infer (Param p) = undefined -- TODO
+> infer (Param p) = (Map.lookup p . ieParams) <$> ask >>= maybe (throwError TypeError) return
 > infer (Abs t b) = Prod t <$> extend t (infer b)
 > infer (App f a) = do
 >     (ta, tb) <- inferP f
@@ -115,14 +130,19 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >     zipWithM constr (zip [0..] $ iConstructors i) ts
 >     return $ substituteMany 0 (t:inds) tt
 >
-> type InferE a = UnifyEqT Term (ExceptT TypeError (Reader [Term])) a
+> type InferE a = UnifyEqT Term (ExceptT TypeError (Reader (InferEnv Void))) a
 >
 > runInferE :: [Term] -> InferE a -> Either TypeError a
-> runInferE ts m = runReader (runExceptT $ runUnifyEqT m) ts
+> runInferE ts m = runReader (runExceptT $ runUnifyEqT m) (InferEnv ts Map.empty)
+>
+> type InferU k a = UnifyT k (ParamTerm k) (ExceptT TypeError (Reader (InferEnv k))) a
+>
+> runInferU :: (Ord k, Infinite k) => InferEnv k -> InferU k a -> Either TypeError a
+> runInferU ie m = runReader (runExceptT $ runUnifyT m) ie
 >
 > runInfer :: Term -> Either TypeError Term
 > runInfer = runInfer' []
-
+>
 > runInfer' :: [Term] -> Term -> Either TypeError Term
 > runInfer' ts = runInferE ts . infer
 
@@ -195,7 +215,7 @@ abstraction, leading us to use `offsetFree`. Thus, extending the environment loo
 > extend t m = extend' t $ const m
 >
 > extend' :: MonadInfer k m => ParamTerm k -> (Sort -> m a) -> m a
-> extend' t f = inferS t >>= \u -> local (map (offsetFree 1) . (t:)) (f u)
+> extend' t f = inferS t >>= \u -> local (pushRef t) (f u)
 >
 > extendAll :: MonadInfer k m => [ParamTerm k] -> m a -> m a
 > extendAll = flip (foldr extend)
@@ -225,3 +245,37 @@ We should also write some code to perform type checking on entire modules.
 >
 > checkModule :: Module -> Either TypeError ()
 > checkModule m = runInferE [] $ mapM_ checkFunction $ catMaybes $ map (asFunction . dContent) $ Map.elems $ mDefinitions m
+
+{{< todo >}} new stuff below {{< /todo >}}
+
+> instantiate :: (MonadWriter [(k, ParamTerm k)] m,  MonadUnify k (ParamTerm k) m) => ParamTerm () -> m (ParamTerm k)
+> instantiate = traverse (const inst)
+>     where
+>         inst = do
+>             x <- fresh
+>             xt <- fresh
+>             tell [(x, Param xt)]
+>             return $ x
+>
+> stripParams :: ParamTerm a -> Maybe Term
+> stripParams (Ref i) = Just $ Ref i
+> stripParams (Fun f) = Just $ Fun f
+> stripParams (Fix f) = Just $ Fix f
+> stripParams Param{} = Nothing
+> stripParams (Abs l r) = liftA2 Abs (stripParams l) (stripParams r)
+> stripParams (App l r) = liftA2 App (stripParams l) (stripParams r)
+> stripParams (Let l r) = liftA2 Let (stripParams l) (stripParams r)
+> stripParams (Prod l r) = liftA2 Prod (stripParams l) (stripParams r)
+> stripParams (Sort s) = Just $ Sort s
+> stripParams (Constr c ci) = Just $ Constr c ci
+> stripParams (Ind i) = Just $ Ind i
+> stripParams (Case t i tt ts) = liftA3 (flip Case i) (stripParams t) (stripParams tt) (mapM stripParams ts)
+>
+> elaborate :: ParamTerm () -> Maybe Term
+> elaborate pt = either (const Nothing) Just $ runInferU (InferEnv [] Map.empty) (elab :: InferU String Term)
+>     where
+>         elab = do
+>             (ipt, ps) <- runWriterT (instantiate pt)
+>             local (setParams $ Map.fromList ps) $ infer ipt
+>             ipt' <- reify ipt
+>             maybe (throwError TypeError) return (stripParams ipt')
