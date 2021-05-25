@@ -103,14 +103,14 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >         t -> joinS ua t
 > infer (Sort u) = return $ Sort $ nextSort u
 > infer (Constr i ci) = withConstr $
->     \c -> return $ foldr Prod (parameterize $ cReturn c) (parameterizeAll $ iParams i ++ cParams c)
+>     \c -> return $ foldr Prod (parameterize $ cReturn c) (parameterizeAll $ map snd $ iParams i ++ cParams c)
 >     where
 >         mConstr = nth ci $ iConstructors i
 >         withConstr f = maybe (throwError UnknownConstructor) f mConstr
 >         cParamRefs c = map (+length (cParams c)) [0..length (iParams i) -1]
 >         cIndParams c = map Ref $ reverse $ cParamRefs c
 >         cReturn c = foldl App (Ind i) $ cIndParams c ++ cIndices c
-> infer (Ind i) = return $ foldr Prod (Sort $ iSort i) $ (parameterizeAll $ iParams i ++ iArity i)
+> infer (Ind i) = return $ foldr Prod (Sort $ iSort i) $ (parameterizeAll $ map snd (iParams i) ++ iArity i)
 > infer (Case t i tt ts) = do
 >     (i', is) <- inferI t
 >     guardE TypeError $ i == i'
@@ -118,7 +118,7 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >     let subPs off = substituteMany off (map (offsetFree off) ps)
 >     let tType = foldl App (Ind i) is
 >     let constr (ci,c) b = do
->          let cps = zipWith subPs [0..] $ parameterizeAll $ cParams c
+>          let cps = zipWith subPs [0..] $ parameterizeAll $ map snd $ cParams c
 >          let inds' = map (subPs $ length cps) $ parameterizeAll $ cIndices c
 >          let rcps = map (Ref . negate) $ [1..length cps]
 >          let expt = foldl App (Constr i ci) $ rcps
@@ -239,7 +239,7 @@ We should also write some code to perform type checking on entire modules.
 
 > checkFunction :: MonadInfer Void m => Function -> m Term
 > checkFunction f = do
->     ft <- extendAll (fArity f) $ infer $ fBody f
+>     ft <- extendAll (map snd $ fArity f) $ infer $ fBody f
 >     guardE (TypeMismatch (eval ft) (eval (fType f))) $ eval ft == eval (fType f)
 >     return ft
 >

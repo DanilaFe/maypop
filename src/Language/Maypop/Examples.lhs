@@ -81,7 +81,7 @@ Here's one for natural numbers.
 >     , iName = "ℕ"
 >     , iConstructors =
 >         [ Constructor { cParams = [], cIndices = [], cName = "O" }
->         , Constructor { cParams = [ Ind nat ], cIndices = [], cName = "S" }
+>         , Constructor { cParams = [ (Explicit, Ind nat) ], cIndices = [], cName = "S" }
 >         ]
 >     }
 
@@ -138,8 +138,8 @@ This is the code we end up with:
 >     , iSort = Type 0
 >     , iName = "Fin"
 >     , iConstructors =
->         [ Constructor { cParams = [ Ind nat ], cIndices = [ s (Ref 0) ], cName = "FZ" }
->         , Constructor { cParams = [ Ind nat, App (Ind fin) (Ref 0) ], cIndices = [ App (Constr nat 1) (Ref 1) ], cName = "FS" }
+>         [ Constructor { cParams = [ (Inferred, Ind nat) ], cIndices = [ s (Ref 0) ], cName = "FZ" }
+>         , Constructor { cParams = [ (Inferred, Ind nat), (Explicit, App (Ind fin) (Ref 0)) ], cIndices = [ App (Constr nat 1) (Ref 1) ], cName = "FS" }
 >         ]
 >     }
 
@@ -159,13 +159,13 @@ with `y : B`. In short, `Either` is effectively a coproduct, or sum type.
 
 > either_ :: Inductive
 > either_ = Inductive
->     { iParams = [t 0, t 0]
+>     { iParams = [(Explicit, t 0), (Explicit, t 0)]
 >     , iArity = []
 >     , iSort = Type 0
 >     , iName = "Either"
 >     , iConstructors =
->         [ Constructor { cParams = [Ref 1], cIndices = [], cName = "Left" }
->         , Constructor { cParams = [Ref 0], cIndices = [], cName = "Right" }
+>         [ Constructor { cParams = [(Explicit, Ref 1)], cIndices = [], cName = "Left" }
+>         , Constructor { cParams = [(Explicit, Ref 0)], cIndices = [], cName = "Right" }
 >         ]
 >     }
 
@@ -188,12 +188,12 @@ which contains values of _both_ types.
 
 > pair_ :: Inductive
 > pair_ = Inductive
->     { iParams = [t 0, t 0]
+>     { iParams = [(Explicit, t 0), (Explicit, t 0)]
 >     , iArity = []
 >     , iSort = Type 0
 >     , iName = "Pair"
 >     , iConstructors =
->         [ Constructor { cParams = [Ref 1, Ref 1], cIndices = [], cName = "MkPair" }
+>         [ Constructor { cParams = [(Explicit, Ref 1), (Explicit, Ref 1)], cIndices = [], cName = "MkPair" }
 >         ]
 >     }
 
@@ -271,7 +271,7 @@ the type itself. For instance, we can define a `Countable` data type:
 >     , iSort = Type 0
 >     , iName = "Countable"
 >     , iConstructors =
->         [ Constructor { cParams = [t 0, (Ref 0), Prod (Ref 1) (Ind nat)], cIndices = [], cName = "Wrap" }
+>         [ Constructor { cParams = [(Explicit, t 0), (Explicit, Ref 0), (Explicit, Prod (Ref 1) (Ind nat))], cIndices = [], cName = "Wrap" }
 >         ]
 >     }
 
@@ -318,4 +318,4 @@ Let's also write some examples of actual modules in our language. We can, for
 instance, re-use the module for natural numbers we defined earlier.
 
 > natMod = Module (ModuleHeader (MkSymbol ["Nat", "Data"]) [])
->     $ Map.fromList [("ℕ", Definition Public $ IndDef nat), ("pred", Definition Public $ FunDef (Function "pred" [Ind nat] (Ind nat) pred_))]
+>     $ Map.fromList [("ℕ", Definition Public $ IndDef nat), ("pred", Definition Public $ FunDef (Function "pred" [(Explicit, Ind nat)] (Ind nat) pred_))]

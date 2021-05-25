@@ -54,7 +54,7 @@ terms do not have parameters in them, so we use `fmap absurd` to convert
 from `ParamTerm Void` to `ParamTerm a`.
 
 > expandFunction :: Function -> ParamTerm a
-> expandFunction f = absurd <$> foldr Abs (fBody f) (fArity f)
+> expandFunction f = absurd <$> foldr Abs (fBody f) (map snd $ fArity f)
 
 You may notice that the case for `App` uses a whole another function. Indeed,
 the situation with applications is a little complicated. Of course, there's

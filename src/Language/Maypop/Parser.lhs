@@ -469,13 +469,16 @@ repetitive.
 >         Just [] -> throwError InvalidFixpoint
 >         _ -> return $ Right f
 >
+> allExplicit :: [S.ParamTerm a] -> [(ParamType, S.ParamTerm a)]
+> allExplicit = map ((,) Explicit)
+>
 > resolveFun :: MonadResolver m => ParseFun -> m DefinitionContent
 > resolveFun f = do
 >     fts <- resolveTerm (pfType f)
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
 >     rec f' <- withNoDecreasing $ withFun f $ emitFunOrFix (pfName f) f' >> do
 >          fb <- withSizedVars Original (pfArity f) $ resolveTerm (pfBody f)
->          createFunOrFix (pfArity f) $ Function (pfName f) ats rt fb
+>          createFunOrFix (pfArity f) $ Function (pfName f) (allExplicit ats) rt fb
 >     return $ either FixDef FunDef f'
 >
 > collectFunArgs :: [String] -> S.Term -> Either ResolveError ([S.Term], S.Term)
@@ -493,14 +496,14 @@ repetitive.
 > resolveConstr pc = do
 >     ps' <- resolveParams (pcParams pc)
 >     is' <- withVars (fst $ unzip $ pcParams pc) $ mapM resolveTerm (pcIndices pc)
->     return $ Constructor ps' is' (pcName pc)
+>     return $ Constructor (allExplicit ps') is' (pcName pc)
 >
 > resolveInd :: MonadResolver m => ParseInd -> m S.Inductive
 > resolveInd pi = do
 >     (ps', is') <- splitAt (length $ piParams pi) <$> resolveParams (piParams pi ++ piArity pi)
 >     rec i' <- emitInd (piName pi) i' >> do
 >          cs <- withVars (map fst $ piParams pi) $ mapM resolveConstr (piConstructors pi)
->          return $ Inductive ps' is' (piSort pi) cs (piName pi)
+>          return $ Inductive (allExplicit ps') is' (piSort pi) cs (piName pi)
 >     emitConstructors i'
 >     return i'
 > 

@@ -97,14 +97,18 @@ An entire data type declaration must have its shared parameters
 list of argument terms `B1` through `Bm`), the sort that it returns (`iSort`),
 a list of its constructors (`iConstructors`) and, once again, a name (`iName`).
 
+{{< todo >}}Explain this. {{ </todo >}}
+
+> data ParamType = Inferred | Explicit
+
 > data Constructor = Constructor
->     { cParams :: [Term]
+>     { cParams :: [(ParamType, Term)]
 >     , cIndices :: [Term]
 >     , cName :: String
 >     }
 >
 > data Inductive = Inductive
->     { iParams :: [Term]
+>     { iParams :: [(ParamType, Term)]
 >     , iArity :: [Term]
 >     , iSort :: Sort
 >     , iConstructors :: [Constructor]
@@ -151,7 +155,7 @@ to ensure that every one of the function's arguments _actually_ has a type.
 
 > data Function = Function
 >     { fName :: String
->     , fArity :: [Term]
+>     , fArity :: [(ParamType, Term)]
 >     , fType :: Term
 >     , fBody :: Term
 >     }
@@ -165,7 +169,7 @@ It's always good to have in hand the _whole_ type of the function (`Args -> Retu
 This is a straightforward right-associative fold:
 
 > fFullType :: Function -> Term
-> fFullType f = foldr Prod (fType f) (fArity f)
+> fFullType f = foldr Prod (fType f) (map snd $ fArity f)
 
 One moment, though. What about the parameter names, like `n` from
 the `factorial` example above? It so happens that we will be using DeBrujin
