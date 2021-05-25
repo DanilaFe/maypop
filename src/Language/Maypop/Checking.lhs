@@ -14,6 +14,7 @@ Let's work on type inference a little.
 > import Language.Maypop.Unification hiding (substitute)
 > import Control.Monad.Reader
 > import Control.Monad.Except
+> import Control.Applicative
 > import Data.Bifunctor
 > import Data.Bool
 > import Data.Void
@@ -155,7 +156,12 @@ helps the type system "remember" that this is not just any term that passed our 
 Once again, we define a specailized version of `infer` for products:
 
 > inferP :: MonadInfer k m => ParamTerm k -> m (ParamTerm k, ParamTerm k)
-> inferP t = eval <$> infer t >>= intoProduct
+> inferP t =
+>     do
+>         t' <- eval <$> infer t
+>         -- This is a hack to make Void type inference work.
+>         intoProduct t' <|> (freshProd >>= unify t' >>= intoProduct)
+>     where freshProd = liftA2 Prod (Param <$> fresh) (Param <$> fresh)
 
 Just as we may want to cast a data type into a product, we may also want to cast
 it into an inductive data type, extracting the parameters and indices. Things
