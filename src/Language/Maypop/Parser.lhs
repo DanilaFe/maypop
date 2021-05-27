@@ -294,7 +294,8 @@ repetitive.
 > elaborate :: MonadResolver m => S.Term -> S.Term -> ResolveTerm -> m S.Term
 > elaborate self f rt =
 >     do
->         let e = runInferU (InferEnv [] Map.empty) elab
+>         env <- parameterizeAll <$> asks reEnv
+>         let e = runInferU (InferEnv env Map.empty) elab
 >         liftEither $ first ElaborateFailed e
 >     where
 >         elab :: InferU String S.Term
@@ -313,6 +314,7 @@ repetitive.
 >     , reHeader :: ModuleHeader
 >     , reCurrentFun :: Maybe ParseFun
 >     , reApps :: [ParseTerm]
+>     , reEnv :: [S.Term]
 >     }
 >
 > withSizedVar :: MonadReader ResolveEnv m => VarSize -> String -> m a -> m a
@@ -332,6 +334,12 @@ repetitive.
 >
 > withApp :: MonadReader ResolveEnv m => ParseTerm -> m a -> m a
 > withApp pt = local $ \re -> re { reApps = pt : reApps re }
+>
+> withRef :: MonadReader ResolveEnv m => S.Term -> m a -> m a
+> withRef t = local $ \re -> re { reEnv = map (offsetFree 1) $ t : reEnv re }
+>
+> withRefs :: MonadReader ResolveEnv m => [S.Term] -> m a -> m a
+> withRefs ts m = foldr withRef m ts
 >
 > clearApps :: MonadReader ResolveEnv m => m a -> m a
 > clearApps = local $ \re -> re { reApps = [] }
@@ -509,9 +517,10 @@ repetitive.
 > resolveFun f = do
 >     fts <- resolveTerm (pfType f)
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
->     rec f' <- withNoDecreasing $ withFun f $ emitFunOrFix (pfName f) f' >> do
+>     rec f' <- withNoDecreasing $ withRefs ats $ withFun f $ emitFunOrFix (pfName f) f' >> do
 >          fb <- withSizedVars Original (pfArity f) $ resolveTerm (pfBody f)
->          createFunOrFix (pfArity f) $ Function (pfName f) (allExplicit ats) rt fb
+>          fb' <- elaborate fts (either S.Fix S.Fun f') (parameterize fb)
+>          createFunOrFix (pfArity f) $ Function (pfName f) (allExplicit ats) rt fb'
 >     return $ either FixDef FunDef f'
 >
 > collectFunArgs :: [String] -> S.Term -> Either ResolveError ([S.Term], S.Term)
@@ -534,7 +543,7 @@ repetitive.
 > resolveInd :: MonadResolver m => ParseInd -> m S.Inductive
 > resolveInd pi = do
 >     (ps', is') <- splitAt (length $ piParams pi) <$> resolveParams (piParams pi ++ piArity pi)
->     rec i' <- emitInd (piName pi) i' >> do
+>     rec i' <- withRefs ps' $ emitInd (piName pi) i' >> do
 >          cs <- withVars (map fst $ piParams pi) $ mapM resolveConstr (piConstructors pi)
 >          return $ Inductive (allExplicit ps') is' (piSort pi) cs (piName pi)
 >     emitConstructors i'
@@ -550,5 +559,5 @@ repetitive.
 > resolveDefs :: ModuleHeader -> GlobalScope -> [(String, ParseDef)] -> Either ResolveError (Map.Map String Definition)
 > resolveDefs mh gs ps = (rsDefs . snd) <$> (runExcept $ runReaderT (runStateT (mapM (resolveDef . snd) ps) state) env)
 >     where
->         env = ResolveEnv { reVars = [], reHeader = mh, reCurrentFun = Nothing, reApps = [] }
+>         env = ResolveEnv { reVars = [], reHeader = mh, reCurrentFun = Nothing, reApps = [], reEnv = [] }
 >         state = ResolveState { rsScope = gs, rsDefs = Map.empty, rsDecreasing = Nothing }
