@@ -248,15 +248,6 @@ We should also write some code to perform type checking on entire modules.
 
 {{< todo >}} new stuff below {{< /todo >}}
 
-> instantiate :: (MonadWriter [(k, ParamTerm k)] m,  MonadUnify k (ParamTerm k) m) => ParamTerm () -> m (ParamTerm k)
-> instantiate = traverse (const inst)
->     where
->         inst = do
->             x <- fresh
->             xt <- fresh
->             tell [(x, Param xt)]
->             return $ x
->
 > strip :: ParamTerm a -> Maybe Term
 > strip (Ref i) = Just $ Ref i
 > strip (Fun f) = Just $ Fun f
@@ -270,12 +261,3 @@ We should also write some code to perform type checking on entire modules.
 > strip (Constr c ci) = Just $ Constr c ci
 > strip (Ind i) = Just $ Ind i
 > strip (Case t i tt ts) = liftA3 (flip Case i) (strip t) (strip tt) (mapM strip ts)
->
-> elaborate :: ParamTerm () -> Maybe Term
-> elaborate pt = either (const Nothing) Just $ runInferU (InferEnv [] Map.empty) (elab :: InferU String Term)
->     where
->         elab = do
->             (ipt, ps) <- runWriterT (instantiate pt)
->             local (setParams $ Map.fromList ps) $ infer ipt
->             ipt' <- reify ipt
->             maybe (throwError TypeError) return (strip ipt')

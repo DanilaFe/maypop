@@ -13,10 +13,13 @@ repetitive.
 > import Language.Maypop.Syntax hiding (ParamTerm(..), Term)
 > import qualified Language.Maypop.Syntax as S
 > import Language.Maypop.Modules
+> import Language.Maypop.Unification
+> import Language.Maypop.Checking hiding (NotInductive)
 > import Control.Applicative hiding ((<|>), many)
 > import Control.Monad.Reader
 > import Control.Monad.State
 > import Control.Monad.Except
+> import Control.Monad.Writer
 > import Text.Parsec
 > import Text.Parsec.Token
 > import Text.Parsec.Expr
@@ -267,9 +270,39 @@ repetitive.
 >     | IncompleteMatch
 >     | ImportError ImportError
 >     | InvalidFixpoint
+>     | ElaborateFailed TypeError
 >     deriving Show
 >
 > data VarSize = Original | SmallerThan String | Unknown deriving Show
+>
+> data ResolveParam = Self | Placeholder
+>
+> type ResolveTerm = S.ParamTerm ResolveParam
+>
+> instantiate
+>     :: (MonadWriter [(k, S.ParamTerm k)] m,  MonadUnify k (S.ParamTerm k) m)
+>     => S.Term -> S.Term -> ResolveTerm -> m (S.ParamTerm k)
+> instantiate self f = traverse inst
+>     where
+>         type_ Placeholder x = fresh >>= \t -> tell [(x, S.Param t)]
+>         type_ Self x = bind x (parameterize f) >> tell [(x, parameterize self)]
+>         inst rp = do
+>             x <- fresh
+>             type_ rp x
+>             return x
+>
+> elaborate :: MonadResolver m => S.Term -> S.Term -> ResolveTerm -> m S.Term
+> elaborate self f rt =
+>     do
+>         let e = runInferU (InferEnv [] Map.empty) elab
+>         liftEither $ first ElaborateFailed e
+>     where
+>         elab :: InferU String S.Term
+>         elab = runUnifyT $ do
+>             (pt, ts) <- runWriterT $ instantiate self f rt
+>             local (setParams $ Map.fromList ts) $ infer pt
+>             pt' <- reify pt
+>             maybe (throwError TypeError) return $ strip pt' 
 >
 > varParent :: VarSize -> Maybe String
 > varParent (SmallerThan s) = Just s
