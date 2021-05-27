@@ -257,19 +257,19 @@ We should also write some code to perform type checking on entire modules.
 >             tell [(x, Param xt)]
 >             return $ x
 >
-> stripParams :: ParamTerm a -> Maybe Term
-> stripParams (Ref i) = Just $ Ref i
-> stripParams (Fun f) = Just $ Fun f
-> stripParams (Fix f) = Just $ Fix f
-> stripParams Param{} = Nothing
-> stripParams (Abs l r) = liftA2 Abs (stripParams l) (stripParams r)
-> stripParams (App l r) = liftA2 App (stripParams l) (stripParams r)
-> stripParams (Let l r) = liftA2 Let (stripParams l) (stripParams r)
-> stripParams (Prod l r) = liftA2 Prod (stripParams l) (stripParams r)
-> stripParams (Sort s) = Just $ Sort s
-> stripParams (Constr c ci) = Just $ Constr c ci
-> stripParams (Ind i) = Just $ Ind i
-> stripParams (Case t i tt ts) = liftA3 (flip Case i) (stripParams t) (stripParams tt) (mapM stripParams ts)
+> strip :: ParamTerm a -> Maybe Term
+> strip (Ref i) = Just $ Ref i
+> strip (Fun f) = Just $ Fun f
+> strip (Fix f) = Just $ Fix f
+> strip Param{} = Nothing
+> strip (Abs l r) = liftA2 Abs (strip l) (strip r)
+> strip (App l r) = liftA2 App (strip l) (strip r)
+> strip (Let l r) = liftA2 Let (strip l) (strip r)
+> strip (Prod l r) = liftA2 Prod (strip l) (strip r)
+> strip (Sort s) = Just $ Sort s
+> strip (Constr c ci) = Just $ Constr c ci
+> strip (Ind i) = Just $ Ind i
+> strip (Case t i tt ts) = liftA3 (flip Case i) (strip t) (strip tt) (mapM strip ts)
 >
 > elaborate :: ParamTerm () -> Maybe Term
 > elaborate pt = either (const Nothing) Just $ runInferU (InferEnv [] Map.empty) (elab :: InferU String Term)
@@ -278,4 +278,4 @@ We should also write some code to perform type checking on entire modules.
 >             (ipt, ps) <- runWriterT (instantiate pt)
 >             local (setParams $ Map.fromList ps) $ infer ipt
 >             ipt' <- reify ipt
->             maybe (throwError TypeError) return (stripParams ipt')
+>             maybe (throwError TypeError) return (strip ipt')
