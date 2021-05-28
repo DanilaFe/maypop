@@ -318,4 +318,4 @@ Let's also write some examples of actual modules in our language. We can, for
 instance, re-use the module for natural numbers we defined earlier.
 
 > natMod = Module (ModuleHeader (MkSymbol ["Nat", "Data"]) [])
->     $ Map.fromList [("ℕ", Definition Public $ IndDef nat), ("pred", Definition Public $ FunDef (Function "pred" [(Explicit, Ind nat)] (Ind nat) pred_))]
+>     $ Map.fromList [("ℕ", Definition Public $ IndDef nat), ("pred", Definition Public $ FunDef (Function "pred" [(Explicit, Ind nat)] (Ind nat) pred_ (Just 0)))]

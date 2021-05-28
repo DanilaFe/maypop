@@ -34,7 +34,7 @@ allows case expressions to "unpack" instances of constructed terms and
 use their contents.
 
 > eval :: ParamTerm a -> ParamTerm a
-> eval (Fun f) = eval $ expandFunction f
+> eval (Fun f) | isNothing (fDecrease f) = eval $ expandFunction f
 > eval (Abs l r) = Abs (eval l) (eval r)
 > eval t@App{} = evalApps $ evalLeftmost t
 > eval (Let l r) = do
@@ -107,10 +107,11 @@ the chain of applications, but this time evaluating the arguments.
 
 > evalApps :: (ParamTerm a, [ParamTerm a]) -> ParamTerm a
 > evalApps (Abs _ b, t:ts) = evalApps (eval $ substitute 0 t b, ts) -- Beta reduction
-> evalApps (Fix f, ts)
->     | Just t <- nth (fxDecArg f) ts
+> evalApps (Fun f, ts)
+>     | Just i <- fDecrease f
+>     , Just t <- nth i ts
 >     , Just t' <- fmap rebuildConstrApps $ collectConstrApps $ eval t =
->         evalApps $ (expandFunction (fxFun f), replaceNth (fxDecArg f) t' ts) -- Iota reduction (fixpoint)
+>         evalApps $ (expandFunction f, replaceNth i t' ts) -- Iota reduction (fixpoint)
 > evalApps (t, ts) = foldl App t (map eval ts)
 >
 > replaceNth :: Int -> a -> [a] -> [a]

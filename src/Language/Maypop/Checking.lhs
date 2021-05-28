@@ -88,7 +88,6 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 > infer :: MonadInfer k m => ParamTerm k -> m (ParamTerm k)
 > infer (Ref n) = (nth n . ieRefs) <$> ask >>= maybe (throwError (FreeVariable n)) return
 > infer (Fun f) = return $ parameterize $ fFullType f
-> infer (Fix f) = return $ parameterize $ fFullType $ fxFun f
 > infer (Param p) = (Map.lookup p . ieParams) <$> ask >>= maybe (throwError TypeError) return
 > infer (Abs t b) = Prod t <$> extend t (infer b)
 > infer (App f a) = do
@@ -244,14 +243,13 @@ We should also write some code to perform type checking on entire modules.
 >     return ft
 >
 > checkModule :: Module -> Either TypeError ()
-> checkModule m = runInferE [] $ mapM_ checkFunction $ catMaybes $ map (asFunction . dContent) $ Map.elems $ mDefinitions m
+> checkModule m = runInferE [] $ mapM_ checkFunction $ catMaybes $ map (function . dContent) $ Map.elems $ mDefinitions m
 
 {{< todo >}} new stuff below {{< /todo >}}
 
 > strip :: ParamTerm a -> Maybe Term
 > strip (Ref i) = Just $ Ref i
 > strip (Fun f) = Just $ Fun f
-> strip (Fix f) = Just $ Fix f
 > strip Param{} = Nothing
 > strip (Abs l r) = liftA2 Abs (strip l) (strip r)
 > strip (App l r) = liftA2 App (strip l) (strip r)
