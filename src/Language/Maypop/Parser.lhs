@@ -519,8 +519,7 @@ repetitive.
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
 >     rec f' <- withNoDecreasing $ withRefs ats $ withFun f $ emitFunOrFix (pfName f) f' >> do
 >          fb <- withSizedVars Original (pfArity f) $ resolveTerm (pfBody f)
->          fb' <- elaborate fts (either S.Fix S.Fun f') (parameterize fb)
->          createFunOrFix (pfArity f) $ Function (pfName f) (allExplicit ats) rt fb'
+>          createFunOrFix (pfArity f) $ Function (pfName f) (allExplicit ats) rt fb
 >     return $ either FixDef FunDef f'
 >
 > collectFunArgs :: [String] -> S.Term -> Either ResolveError ([S.Term], S.Term)
