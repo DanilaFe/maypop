@@ -273,7 +273,7 @@ repetitive.
 >     | ElaborateFailed TypeError
 >     deriving Show
 >
-> data VarSize = Original | SmallerThan String | Unknown deriving Show
+> data VarSize = SelfRef | Original | SmallerThan String | Unknown deriving Show
 >
 > data ResolveParam = Self | Placeholder
 >
@@ -366,8 +366,13 @@ repetitive.
 > currentModule :: MonadReader ResolveEnv m => m Symbol
 > currentModule = asks (mhName . reHeader)
 >
-> lookupVar :: MonadReader ResolveEnv m => String -> m (Maybe Int)
-> lookupVar s = asks (elemIndex s . map fst . reVars)
+> lookupVar :: MonadReader ResolveEnv m => String -> m (Maybe ResolveTerm)
+> lookupVar s = asks (getFirst . (findSelf <> findRef) . reVars)
+>     where
+>         findRef = First . fmap S.Ref . elemIndex s . map fst
+>         findSelf = First . (>>= intoSelf) . lookup s
+>         intoSelf Original = Just $ S.Param Self
+>         intoSelf _ = Nothing
 >
 > varSize :: MonadReader ResolveEnv m => String -> m VarSize
 > varSize s = asks (fromMaybe Unknown . lookup s . reVars)
@@ -435,17 +440,14 @@ repetitive.
 > smallerParams :: [Maybe (String, VarSize)] -> Set.Set String
 > smallerParams mps = Set.fromList $ catMaybes $ map (>>=(varParent . snd)) mps
 >
-> recordFixpoint :: MonadResolver m => String -> ParseFun -> m ()
-> recordFixpoint s f
->     | s /= pfName f = return ()
->     | otherwise = do
->         params <- take (length $ pfArity f) <$> asks reApps
->         smallerParams <- smallerParams <$> mapM termSize params
->         emitDecreasing smallerParams
+> recordFixpoint :: MonadResolver m => m ()
+> recordFixpoint = do
+>     params <- take (length $ pfArity undefined) <$> asks reApps
+>     smallerParams <- smallerParams <$> mapM termSize params
+>     emitDecreasing smallerParams
 > 
 > lookupUnqual :: MonadResolver m => String -> m S.Term
 > lookupUnqual s = do
->     asks reCurrentFun >>= maybe (return ()) (recordFixpoint s)
 >     es <- gets (fromMaybe [] . Map.lookup (unqualName s) . sUnqualified . rsScope)
 >     exportToTerm <$> narrowExports es
 >
@@ -487,6 +489,7 @@ repetitive.
 >     mts <- termSize t
 >     return $ case mts of
 >         Just (s, Original) -> SmallerThan s
+>         Just (s, SelfRef) -> Unknown
 >         Just (_, vs) -> vs
 >         _ -> Unknown
 >
@@ -494,7 +497,7 @@ repetitive.
 > resolveTerm (Ref (StrRef s)) = do
 >     vref <- lookupVar s
 >     case vref of
->         Just i -> return $ (S.Ref i)
+>         Just i -> recordFixpoint >> return (undefined i)
 >         Nothing -> lookupUnqual s
 > resolveTerm (Ref (SymRef s)) = lookupQual s
 > resolveTerm (Abs (x, tt) t) = clearApps $ liftA2 S.Abs (resolveTerm tt) (withVar x $ resolveTerm t)
