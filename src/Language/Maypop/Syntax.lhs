@@ -99,7 +99,7 @@ a list of its constructors (`iConstructors`) and, once again, a name (`iName`).
 
 {{< todo >}}Explain this. {{ </todo >}}
 
-> data ParamType = Inferred | Explicit
+> data ParamType = Inferred | Explicit deriving (Eq, Show)
 
 > data Constructor = Constructor
 >     { cParams :: [(ParamType, Term)]

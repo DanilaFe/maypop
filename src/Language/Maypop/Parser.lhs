@@ -64,11 +64,14 @@ repetitive.
 >
 > data ParseFun = ParseFun
 >     { pfName :: String
->     , pfArity :: [String]
+>     , pfArity :: [(ParamType, String)]
 >     , pfType :: ParseTerm
 >     , pfBody :: ParseTerm
 >     }
 >     deriving Show
+>
+> pfArgNames :: ParseFun -> [String]
+> pfArgNames = map snd . pfArity
 >
 > type ParseDef = Either ParseInd ParseFun
 >
@@ -241,6 +244,11 @@ repetitive.
 >     kw "end"
 >     return $ (name, ParseInd name ps ar s cs)
 >
+> funParam :: Parser (ParamType, String)
+> funParam =
+>     (sym "{" *> ((,) Inferred <$> ident) <* sym "}") <|> 
+>     ((,) Explicit <$> ident)
+> 
 > function :: Parser (String, ParseFun)
 > function = do
 >    name <- ident
@@ -248,7 +256,7 @@ repetitive.
 >    t <- term
 >    kw "where"
 >    sym name
->    ps <- many ident
+>    ps <- many funParam
 >    sym "="
 >    bt <- term
 >    kw "end"
@@ -331,6 +339,9 @@ repetitive.
 >         strip' (S.Constr c ci) = Just $ S.Constr c ci
 >         strip' (S.Ind i) = Just $ S.Ind i
 >         strip' (S.Case t i tt ts) = liftA3 (flip S.Case i) (strip' t) (strip' tt) (mapM strip' ts)
+>
+> leadingInferred :: [(ParamType, a)] -> Int
+> leadingInferred = length . takeWhile ((==Inferred) . fst)
 >
 > varParent :: VarSize -> Maybe String
 > varParent (SmallerThan s) = Just s
@@ -437,9 +448,9 @@ repetitive.
 > emitConstructors i = zipWithM_ emitConstructor [0..] (iConstructors i)
 >     where emitConstructor ci c = emitExport (cName c) (ConExport i ci)
 >
-> exportToTerm :: Export -> S.ParamTerm a
+> exportToTerm :: Export -> ResolveTerm
 > exportToTerm e = case eVariant e of
->     FunExport f -> S.Fun f
+>     FunExport f -> foldl S.App (S.Fun f) $ replicate (leadingInferred $ fArity f) (S.Param Placeholder)
 >     ConExport i ci -> S.Constr i ci
 >     IndExport i -> S.Ind i
 > 
@@ -466,7 +477,7 @@ repetitive.
 > lookupUnqual :: MonadResolver m => String -> m ResolveTerm
 > lookupUnqual s = do
 >     es <- gets (fromMaybe [] . Map.lookup (unqualName s) . sUnqualified . rsScope)
->     parameterize . exportToTerm <$> narrowExports es
+>     exportToTerm <$> narrowExports es
 >
 > lookupQual :: MonadResolver m => Symbol -> m ResolveTerm
 > lookupQual s = do
@@ -551,17 +562,17 @@ repetitive.
 >     traceM $ "Resolving type of " ++ show (pfName f)
 >     fts <- resolveTerm (pfType f) >>= elaborate Nothing
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
->     rec f' <- withNoDecreasing $ withRefs ats $ withSizedVar SelfRef (pfName f) $ withFun f fts $  do
+>     rec f' <- withNoDecreasing $ withRefs (map snd ats) $ withSizedVar SelfRef (pfName f) $ withFun f fts $  do
 >          traceM $ "Resolving body of " ++ show (pfName f)
->          fb <- withSizedVars Original (pfArity f) (resolveTerm (pfBody f)) >>= elaborate (Just (S.Fun f'))
->          md <- findDecreasing (pfArity f) 
->          return $ Function (pfName f) (allExplicit ats) rt fb md
+>          fb <- withSizedVars Original (pfArgNames f) (resolveTerm (pfBody f)) >>= elaborate (Just (S.Fun f'))
+>          md <- findDecreasing (pfArgNames f) 
+>          return $ Function (pfName f) ats rt fb md
 >     emitFun (pfName f) f' 
 >     return f'
 >
-> collectFunArgs :: [String] -> S.ParamTerm a -> Either ResolveError ([S.ParamTerm a], S.ParamTerm a)
+> collectFunArgs :: [(ParamType, String)] -> S.ParamTerm a -> Either ResolveError ([(ParamType, S.ParamTerm a)], S.ParamTerm a)
 > collectFunArgs [] t = return $ ([], t)
-> collectFunArgs (_:xs) (S.Prod l r) = first (l:) <$> collectFunArgs xs r
+> collectFunArgs ((pt,_):xs) (S.Prod l r) = first ((pt,l):) <$> collectFunArgs xs r
 > collectFunArgs _ _ = throwError InvalidArity
 >
 > resolveParams :: MonadResolver m => Maybe S.Term -> [ParseParam] -> m [S.Term]
