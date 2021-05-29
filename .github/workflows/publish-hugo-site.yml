@@ -3,6 +3,7 @@ on: push
 jobs:
     deploy:
         runs-on: ubuntu-latest
+        if: github.ref == 'refs/heads/main'
         steps:
             - name: Clone Maypop source
               uses: actions/checkout@v2
