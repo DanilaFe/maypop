@@ -281,18 +281,21 @@ repetitive.
 >
 > instantiate
 >     :: (MonadWriter [(k, S.ParamTerm k)] m,  MonadUnify k (S.ParamTerm k) m)
->     => S.Term -> S.Term -> ResolveTerm -> m (S.ParamTerm k)
-> instantiate self f = traverse inst
+>     => ResolveTerm -> m (k, S.ParamTerm k)
+> instantiate rt =
+>     do
+>         selfVar <- fresh
+>         (,) selfVar <$> traverse (inst selfVar) rt
 >     where
->         type_ Placeholder x = fresh >>= \t -> tell [(x, S.Param t)]
->         type_ Self x = bind x (parameterize f) >> tell [(x, parameterize self)]
->         inst rp = do
+>         inst x Self = return x
+>         inst x Placeholder = do
 >             x <- fresh
->             type_ rp x
+>             y <- fresh
+>             tell [(x, S.Param y)]
 >             return x
 >
-> elaborate :: MonadResolver m => S.Term -> S.Term -> ResolveTerm -> m S.Term
-> elaborate self f rt =
+> elaborate :: MonadResolver m => ResolveTerm -> m S.Term
+> elaborate rt =
 >     do
 >         env <- parameterizeAll <$> asks reEnv
 >         let e = runInferU (InferEnv env Map.empty) elab
@@ -300,7 +303,7 @@ repetitive.
 >     where
 >         elab :: InferU String S.Term
 >         elab = runUnifyT $ do
->             (pt, ts) <- runWriterT $ instantiate self f rt
+>             ((x, pt), ts) <- runWriterT $ instantiate rt
 >             local (setParams $ Map.fromList ts) $ infer pt
 >             pt' <- reify pt
 >             maybe (throwError TypeError) return $ strip pt' 
