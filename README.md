@@ -39,27 +39,36 @@ What still needs to be done:
 * Tactics to make writing proofs easier
 * Type classes (and automatic search for them)
 
-## Design questions
+## Design Decisions
 
-* We are currently using a very "flattened" representation
-of abstract syntax trees. That is, we don't have references
-to other functions anywhere (other than via DeBrujin indices,
-which refer to parameters of lambda functions). Each `Fun` (function)
-node in our AST literally contains the function it refers to.
-This makes evaluation and typechecking very nice (since we never
-have to look anything else up), but makes parsing a rather nontrivial
-task: we now have to have all other functions in an environment
-while parsing. So we wonder: maybe it's worth using references,
-after all? We would, however, have to bundle an environment for
-all other operations such as evaluation and type checking.
-* How do we define equality on data types? Right now, we use straight
-up names. It may, on one hand, be nice to use the data type's source
-module to ensure equality (otherwise, two moudules defining `Foo` would
-have weird interactions), but then we have to include that information
-with every data type.
-* How do we even do [tactics](https://coq.inria.fr/refman/proof-engine/tactics.html)? Do we define a Haskell API for manpulating
-Maypop ASTs, and write custom tactics in Haskell? Or do we somehow
-extend Maypop with a tactic language? Is there a third option?
+* Represent unification as a monad transformer (`MonadUnify` and `UnifyT`).
+Instead of writing a special purpose function for unifying terms, we have
+put this functionality into a general monad transformer (one that requires
+`MonadlAlternative` on the underlying monad). This was made to improve
+the reusability of the code; while type inference relies on unification,
+so does logic programming, and our type class instance search seems to be
+(at least in simple cases) reducible to a Prolog-like database search.
+We can mix in `LogicT` (from a paper by Oleg Kieselov) for backtracking,
+and implement a prolog-like language in 50 extra lines!
+* Use MTL style as much as possible. This helps us avoid a _lot_ of extra
+code; we hide away a lot of the "plumbing" like environments and common
+variables via `MonadReader`, handle errors via `MonadError`, and so on.
+By using the MTL style of introducing constraints onto a monadic type
+variable, we're able to make our code work in more contexts
+(for instance, we were able to swap out unification mechanisms in
+the type inference code with virtually no changes to the inference
+code itself), and to add various effects (such as unification)
+with very little effort. By abstracting the common set of type
+classes into a "synonym" class (like `MonadInfer`), we're able
+to further clean up our type signatures and simplify refactoring.
+* `IO` hardly occurs in our code; we even define special monad instances
+like `MonadPath` for computations that can be used to interact with the
+filesystem. We thus separate ourselves as much as possible from the concerns
+of impurity, and can focus on the purely functional "core" of our
+application. Furthermore, this would allow us to perform additional
+testing on our code by mocking the results of I/O actions: we can,
+for instance, write a custom instance of `MonadModule`, which
+would return predefined modules instead of trying to read from disk.
 
 ## Running
 The project is built using Stack. Thus, to enter GHCi with
