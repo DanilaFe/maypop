@@ -30,6 +30,7 @@ repetitive.
 > import Data.List
 > import Data.Maybe
 > import Data.Functor.Identity
+> import Debug.Trace
 >
 > data ParseRef = SymRef Symbol | StrRef String deriving Show
 >
@@ -275,7 +276,7 @@ repetitive.
 >
 > data VarSize = SelfRef | Original | SmallerThan String | Unknown deriving Show
 >
-> data ResolveParam = Self | Placeholder
+> data ResolveParam = Self | Placeholder deriving Show
 >
 > type ResolveTerm = S.ParamTerm ResolveParam
 >
@@ -294,24 +295,31 @@ repetitive.
 >             tell [(x, S.Param y)]
 >             return x
 >
-> elaborate :: MonadResolver m => ResolveTerm -> m S.Term
-> elaborate rt =
+> elaborate :: MonadResolver m => Maybe S.Term -> ResolveTerm -> m S.Term
+> elaborate mt rt =
 >     do
 >         env <- parameterizeAll <$> asks reEnv
->         let e = runInferU (InferEnv env Map.empty) elab
+>         traceM $ "Env: " ++ show env
+>         cd <- asks reCurrentDef
+>         let e = runInferU (InferEnv env Map.empty) (elab cd)
 >         liftEither $ first ElaborateFailed e
 >     where
->         elab :: InferU String S.Term
->         elab = runUnifyT $ do
+>         elab :: Maybe (ParseDef, S.Term) -> InferU String S.Term
+>         elab mcd = runUnifyT $ do
 >             ((x, pt), ts) <- runWriterT $ instantiate rt
->             local (setParams $ Map.fromList ts) $ infer pt
+>             let xt = maybe [] (return . (,) x . parameterize . snd) mcd
+>             traceM $ "Extra bindings: " ++ show xt
+>             traceM $ "Inferring..." ++ show rt
+>             local (setParams $ Map.fromList $ ts ++ xt) $ infer pt
+>             traceM "Reifying..."
 >             pt' <- reify pt
->             maybe (throwError TypeError) return $ strip x undefined pt' 
+>             traceM "Stripping..."
+>             maybe (throwError TypeError) return $ strip x mt pt' 
 >
-> strip :: Eq k => k -> S.Term -> S.ParamTerm k -> Maybe S.Term
-> strip k rt = strip'
+> strip :: Eq k => k -> Maybe S.Term -> S.ParamTerm k -> Maybe S.Term
+> strip k mrt = strip'
 >     where
->         strip' (S.Param k') | k == k' = Just rt
+>         strip' (S.Param k') | k == k' = mrt
 >         strip' S.Param{} = Nothing
 >         strip' (S.Ref i) = Just $ S.Ref i
 >         strip' (S.Fun f) = Just $ S.Fun f
@@ -331,7 +339,7 @@ repetitive.
 > data ResolveEnv = ResolveEnv
 >     { reVars :: [(String, VarSize)]
 >     , reHeader :: ModuleHeader
->     , reCurrentFun :: Maybe ParseFun
+>     , reCurrentDef :: Maybe (ParseDef, S.Term)
 >     , reApps :: [ParseTerm]
 >     , reEnv :: [S.Term]
 >     }
@@ -348,8 +356,11 @@ repetitive.
 > withVars :: MonadReader ResolveEnv m => [String] -> m a -> m a
 > withVars xs m = foldr withVar m xs
 >
-> withFun :: MonadReader ResolveEnv m => ParseFun -> m a -> m a
-> withFun f = local $ \re -> re { reCurrentFun = Just f }
+> withFun :: MonadReader ResolveEnv m => ParseFun -> S.Term -> m a -> m a
+> withFun f t = local $ \re -> re { reCurrentDef = Just (Right f, t) }
+>
+> withInd :: MonadReader ResolveEnv m => ParseInd -> S.Term -> m a -> m a
+> withInd i t = local $ \re -> re { reCurrentDef = Just (Left i, t) }
 >
 > withApp :: MonadReader ResolveEnv m => ParseTerm -> m a -> m a
 > withApp pt = local $ \re -> re { reApps = pt : reApps re }
@@ -366,12 +377,12 @@ repetitive.
 > currentModule :: MonadReader ResolveEnv m => m Symbol
 > currentModule = asks (mhName . reHeader)
 >
-> lookupVar :: MonadReader ResolveEnv m => String -> m (Maybe ResolveTerm)
+> lookupVar :: MonadReader ResolveEnv m => String -> m (Maybe (Either () Int))
 > lookupVar s = asks (getFirst . (findSelf <> findRef) . reVars)
 >     where
->         findRef = First . fmap S.Ref . elemIndex s . map fst
+>         findRef = First . fmap Right . elemIndex s . map fst
 >         findSelf = First . (>>= intoSelf) . lookup s
->         intoSelf Original = Just $ S.Param Self
+>         intoSelf SelfRef = Just (Left ())
 >         intoSelf _ = Nothing
 >
 > varSize :: MonadReader ResolveEnv m => String -> m VarSize
@@ -426,7 +437,7 @@ repetitive.
 > emitConstructors i = zipWithM_ emitConstructor [0..] (iConstructors i)
 >     where emitConstructor ci c = emitExport (cName c) (ConExport i ci)
 >
-> exportToTerm :: Export -> S.Term
+> exportToTerm :: Export -> S.ParamTerm a
 > exportToTerm e = case eVariant e of
 >     FunExport f -> S.Fun f
 >     ConExport i ci -> S.Constr i ci
@@ -441,22 +452,28 @@ repetitive.
 > smallerParams mps = Set.fromList $ catMaybes $ map (>>=(varParent . snd)) mps
 >
 > recordFixpoint :: MonadResolver m => m ()
-> recordFixpoint = do
->     params <- take (length $ pfArity undefined) <$> asks reApps
->     smallerParams <- smallerParams <$> mapM termSize params
->     emitDecreasing smallerParams
+> recordFixpoint =
+>     do
+>         asks reCurrentDef
+>             >>= maybe (throwError InvalidFixpoint) return
+>             >>= either (const $ return ()) record . fst
+>     where
+>         record cf = do
+>             params <- take (length $ pfArity cf) <$> asks reApps
+>             smallerParams <- smallerParams <$> mapM termSize params
+>             emitDecreasing smallerParams
 > 
-> lookupUnqual :: MonadResolver m => String -> m S.Term
+> lookupUnqual :: MonadResolver m => String -> m ResolveTerm
 > lookupUnqual s = do
 >     es <- gets (fromMaybe [] . Map.lookup (unqualName s) . sUnqualified . rsScope)
->     exportToTerm <$> narrowExports es
+>     parameterize . exportToTerm <$> narrowExports es
 >
-> lookupQual :: MonadResolver m => Symbol -> m S.Term
+> lookupQual :: MonadResolver m => Symbol -> m ResolveTerm
 > lookupQual s = do
 >     me <- gets (Map.lookup s . sQualified . rsScope)
 >     maybe (throwError UnknownReference) (return . exportToTerm) me
 >
-> lookupRef :: MonadResolver m => ParseRef -> m S.Term
+> lookupRef :: MonadResolver m => ParseRef -> m ResolveTerm
 > lookupRef (SymRef s) = lookupQual s
 > lookupRef (StrRef s) = lookupUnqual s
 >
@@ -474,10 +491,10 @@ repetitive.
 >      then return (i, is)
 >      else throwError InvalidArity
 >
-> resolveBranch :: MonadResolver m => VarSize -> ParseBranch -> m (String, S.Term)
+> resolveBranch :: MonadResolver m => VarSize -> ParseBranch -> m (String, ResolveTerm)
 > resolveBranch vs (s, ps, t) = (,) s <$> withSizedVars vs ps (resolveTerm t)
 >
-> matchBranch :: MonadResolver m => [(String, S.Term)] -> Constructor -> m S.Term
+> matchBranch :: MonadResolver m => [(String, S.ParamTerm a)] -> Constructor -> m (S.ParamTerm a)
 > matchBranch bs c = maybe (throwError IncompleteMatch) return $ lookup (cName c) bs 
 >
 > termSize :: MonadResolver m => ParseTerm -> m (Maybe (String, VarSize))
@@ -493,11 +510,12 @@ repetitive.
 >         Just (_, vs) -> vs
 >         _ -> Unknown
 >
-> resolveTerm :: MonadResolver m => ParseTerm -> m S.Term
+> resolveTerm :: MonadResolver m => ParseTerm -> m ResolveTerm
 > resolveTerm (Ref (StrRef s)) = do
 >     vref <- lookupVar s
 >     case vref of
->         Just i -> recordFixpoint >> return (undefined i)
+>         Just Left{} -> recordFixpoint >> return (S.Param Self)
+>         Just (Right i) -> return (S.Ref i)
 >         Nothing -> lookupUnqual s
 > resolveTerm (Ref (SymRef s)) = lookupQual s
 > resolveTerm (Abs (x, tt) t) = clearApps $ liftA2 S.Abs (resolveTerm tt) (withVar x $ resolveTerm t)
@@ -530,37 +548,48 @@ repetitive.
 >
 > resolveFun :: MonadResolver m => ParseFun -> m S.Function
 > resolveFun f = do
->     fts <- resolveTerm (pfType f)
+>     traceM $ "Resolving type of " ++ show (pfName f)
+>     fts <- resolveTerm (pfType f) >>= elaborate Nothing
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
->     rec f' <- withNoDecreasing $ withRefs ats $ withFun f $ emitFun (pfName f) f' >> do
->          fb <- withSizedVars Original (pfArity f) $ resolveTerm (pfBody f)
+>     rec f' <- withNoDecreasing $ withRefs ats $ withSizedVar SelfRef (pfName f) $ withFun f fts $  do
+>          traceM $ "Resolving body of " ++ show (pfName f)
+>          fb <- withSizedVars Original (pfArity f) (resolveTerm (pfBody f)) >>= elaborate (Just (S.Fun f'))
 >          md <- findDecreasing (pfArity f) 
 >          return $ Function (pfName f) (allExplicit ats) rt fb md
+>     emitFun (pfName f) f' 
 >     return f'
 >
-> collectFunArgs :: [String] -> S.Term -> Either ResolveError ([S.Term], S.Term)
+> collectFunArgs :: [String] -> S.ParamTerm a -> Either ResolveError ([S.ParamTerm a], S.ParamTerm a)
 > collectFunArgs [] t = return $ ([], t)
 > collectFunArgs (_:xs) (S.Prod l r) = first (l:) <$> collectFunArgs xs r
 > collectFunArgs _ _ = throwError InvalidArity
 >
-> resolveParams :: MonadResolver m => [ParseParam] -> m [S.Term]
-> resolveParams = foldr (\(x, t) m -> liftA2 (:) (resolveTerm t) (withVar x m)) (return [])
+> resolveParams :: MonadResolver m => Maybe S.Term -> [ParseParam] -> m [S.Term]
+> resolveParams _ [] = return []
+> resolveParams mt ((x,t):xs) = do
+>     t' <- resolveTerm t >>= elaborate mt
+>     ts <- withVar x $ withRef t' $ resolveParams mt xs
+>     return (t':ts)
 >
-> resolveWithParams :: MonadResolver m => [ParseParam] -> m a -> m ([S.Term], a)
-> resolveWithParams ps m = foldr (\(x, t) m -> liftA2 (first . (:)) (resolveTerm t) (withVar x m)) ((,) [] <$> m) ps
->
-> resolveConstr :: MonadResolver m => ParseConstr -> m S.Constructor
-> resolveConstr pc = do
->     ps' <- resolveParams (pcParams pc)
->     is' <- withVars (fst $ unzip $ pcParams pc) $ mapM resolveTerm (pcIndices pc)
+> resolveConstr :: MonadResolver m => S.Inductive -> ParseConstr -> m S.Constructor
+> resolveConstr i pc = do
+>     traceM $ "Resolving constructor " ++ (pcName pc)
+>     let mt = Just (S.Ind i)
+>     ps' <- resolveParams mt (pcParams pc)
+>     is' <- withVars (fst $ unzip $ pcParams pc) $ mapM ((>>=elaborate mt) . resolveTerm) (pcIndices pc)
 >     return $ Constructor (allExplicit ps') is' (pcName pc)
 >
 > resolveInd :: MonadResolver m => ParseInd -> m S.Inductive
 > resolveInd pi = do
->     (ps', is') <- splitAt (length $ piParams pi) <$> resolveParams (piParams pi ++ piArity pi)
->     rec i' <- withRefs ps' $ emitInd (piName pi) i' >> do
->          cs <- withVars (map fst $ piParams pi) $ mapM resolveConstr (piConstructors pi)
+>     traceM $ "Resolving type of " ++ show (piName pi)
+>     ips <- resolveParams Nothing (piParams pi ++ piArity pi)
+>     let (ps', is') = splitAt (length $ piParams pi) ips
+>     let it = foldr S.Prod (S.Sort $ piSort pi) ips
+>     rec i' <- withRefs ps' $ withSizedVar SelfRef (piName pi) $ withInd pi it $ do
+>          traceM $ "Resolving constructors of " ++ show (piName pi)
+>          cs <- withVars (map fst $ piParams pi) $ mapM (resolveConstr i') (piConstructors pi)
 >          return $ Inductive (allExplicit ps') is' (piSort pi) cs (piName pi)
+>     emitInd (piName pi) i' 
 >     emitConstructors i'
 >     return i'
 > 
@@ -574,5 +603,5 @@ repetitive.
 > resolveDefs :: ModuleHeader -> GlobalScope -> [(String, ParseDef)] -> Either ResolveError (Map.Map String Definition)
 > resolveDefs mh gs ps = (rsDefs . snd) <$> (runExcept $ runReaderT (runStateT (mapM (resolveDef . snd) ps) state) env)
 >     where
->         env = ResolveEnv { reVars = [], reHeader = mh, reCurrentFun = Nothing, reApps = [], reEnv = [] }
+>         env = ResolveEnv { reVars = [], reHeader = mh, reCurrentDef = Nothing, reApps = [], reEnv = [] }
 >         state = ResolveState { rsScope = gs, rsDefs = Map.empty, rsDecreasing = Nothing }
