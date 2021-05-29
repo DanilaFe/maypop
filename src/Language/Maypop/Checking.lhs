@@ -244,18 +244,3 @@ We should also write some code to perform type checking on entire modules.
 >
 > checkModule :: Module -> Either TypeError ()
 > checkModule m = runInferE [] $ mapM_ checkFunction $ catMaybes $ map (function . dContent) $ Map.elems $ mDefinitions m
-
-{{< todo >}} new stuff below {{< /todo >}}
-
-> strip :: ParamTerm a -> Maybe Term
-> strip (Ref i) = Just $ Ref i
-> strip (Fun f) = Just $ Fun f
-> strip Param{} = Nothing
-> strip (Abs l r) = liftA2 Abs (strip l) (strip r)
-> strip (App l r) = liftA2 App (strip l) (strip r)
-> strip (Let l r) = liftA2 Let (strip l) (strip r)
-> strip (Prod l r) = liftA2 Prod (strip l) (strip r)
-> strip (Sort s) = Just $ Sort s
-> strip (Constr c ci) = Just $ Constr c ci
-> strip (Ind i) = Just $ Ind i
-> strip (Case t i tt ts) = liftA3 (flip Case i) (strip t) (strip tt) (mapM strip ts)

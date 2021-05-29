@@ -306,7 +306,23 @@ repetitive.
 >             ((x, pt), ts) <- runWriterT $ instantiate rt
 >             local (setParams $ Map.fromList ts) $ infer pt
 >             pt' <- reify pt
->             maybe (throwError TypeError) return $ strip pt' 
+>             maybe (throwError TypeError) return $ strip x undefined pt' 
+>
+> strip :: Eq k => k -> S.Term -> S.ParamTerm k -> Maybe S.Term
+> strip k rt = strip'
+>     where
+>         strip' (S.Param k') | k == k' = Just rt
+>         strip' S.Param{} = Nothing
+>         strip' (S.Ref i) = Just $ S.Ref i
+>         strip' (S.Fun f) = Just $ S.Fun f
+>         strip' (S.Abs l r) = liftA2 S.Abs (strip' l) (strip' r)
+>         strip' (S.App l r) = liftA2 S.App (strip' l) (strip' r)
+>         strip' (S.Let l r) = liftA2 S.Let (strip' l) (strip' r)
+>         strip' (S.Prod l r) = liftA2 S.Prod (strip' l) (strip' r)
+>         strip' (S.Sort s) = Just $ S.Sort s
+>         strip' (S.Constr c ci) = Just $ S.Constr c ci
+>         strip' (S.Ind i) = Just $ S.Ind i
+>         strip' (S.Case t i tt ts) = liftA3 (flip S.Case i) (strip' t) (strip' tt) (mapM strip' ts)
 >
 > varParent :: VarSize -> Maybe String
 > varParent (SmallerThan s) = Just s
