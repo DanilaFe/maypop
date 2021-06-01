@@ -97,7 +97,7 @@ An entire data type declaration must have its shared parameters
 list of argument terms `B1` through `Bm`), the sort that it returns (`iSort`),
 a list of its constructors (`iConstructors`) and, once again, a name (`iName`).
 
-{{< todo >}}Explain this. {{ </todo >}}
+{{< todo >}}Explain this. {{< /todo >}}
 
 > data ParamType = Inferred | Explicit deriving (Eq, Show)
 >
