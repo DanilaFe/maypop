@@ -30,7 +30,6 @@ repetitive.
 > import Data.List
 > import Data.Maybe
 > import Data.Functor.Identity
-> import Debug.Trace
 >
 > data ParseRef = SymRef Symbol | StrRef String deriving Show
 >
@@ -310,7 +309,6 @@ repetitive.
 > elaborate mt rt =
 >     do
 >         env <- parameterizeAll <$> asks reEnv
->         traceM $ "Env: " ++ show env
 >         cd <- asks reCurrentDef
 >         let e = runInferU (InferEnv env Map.empty) (elab cd)
 >         liftEither $ first ElaborateFailed e
@@ -319,12 +317,8 @@ repetitive.
 >         elab mcd = runUnifyT $ do
 >             ((x, pt), ts) <- runWriterT $ instantiate rt
 >             let xt = maybe [] (return . (,) x . parameterize . snd) mcd
->             traceM $ "Extra bindings: " ++ show xt
->             traceM $ "Inferring..." ++ show rt
 >             local (setParams $ Map.fromList $ ts ++ xt) $ infer pt
->             traceM "Reifying..."
 >             pt' <- reify pt
->             traceM "Stripping..."
 >             maybe (throwError TypeError) return $ strip x mt pt' 
 >
 > strip :: Eq k => k -> Maybe S.Term -> S.ParamTerm k -> Maybe S.Term
@@ -562,11 +556,9 @@ repetitive.
 >
 > resolveFun :: MonadResolver m => ParseFun -> m S.Function
 > resolveFun f = do
->     traceM $ "Resolving type of " ++ show (pfName f)
 >     fts <- resolveTerm (pfType f) >>= elaborate Nothing
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
 >     rec f' <- withNoDecreasing $ withRefs (map snd ats) $ withSizedVar SelfRef (pfName f) $ withFun f fts $  do
->          traceM $ "Resolving body of " ++ show (pfName f)
 >          fb <- withSizedVars Original (pfArgNames f) (resolveTerm (pfBody f)) >>= elaborate (Just (S.Fun f'))
 >          md <- findDecreasing (pfArgNames f) 
 >          return $ Function (pfName f) ats rt fb md
@@ -587,7 +579,6 @@ repetitive.
 >
 > resolveConstr :: MonadResolver m => S.Inductive -> ParseConstr -> m S.Constructor
 > resolveConstr i pc = do
->     traceM $ "Resolving constructor " ++ (pcName pc)
 >     let mt = Just (S.Ind i)
 >     ps' <- resolveParams mt (pcParams pc)
 >     is' <- withVars (fst $ unzip $ pcParams pc) $ mapM ((>>=elaborate mt) . resolveTerm) (pcIndices pc)
@@ -595,12 +586,10 @@ repetitive.
 >
 > resolveInd :: MonadResolver m => ParseInd -> m S.Inductive
 > resolveInd pi = do
->     traceM $ "Resolving type of " ++ show (piName pi)
 >     ips <- resolveParams Nothing (piParams pi ++ piArity pi)
 >     let (ps', is') = splitAt (length $ piParams pi) ips
 >     let it = foldr S.Prod (S.Sort $ piSort pi) ips
 >     rec i' <- withRefs ps' $ withSizedVar SelfRef (piName pi) $ withInd pi it $ do
->          traceM $ "Resolving constructors of " ++ show (piName pi)
 >          cs <- withVars (map fst $ piParams pi) $ mapM (resolveConstr i') (piConstructors pi)
 >          return $ Inductive (allExplicit ps') is' (piSort pi) cs (piName pi)
 >     emitInd (piName pi) i' 
