@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 32cfe6399bd305e5248aa20ef4cea8f0773d3a4c9cbab504b282e6fbbf213010
+-- hash: d71eb1e60c845f919db2aaefa6493df31dfeaa6af77d0d1546c4331d64ad2df8
 
 name:           maypop
 version:        0.1.0.0
@@ -35,6 +35,7 @@ library
       Language.Maypop.Modules
       Language.Maypop.Parser
       Language.Maypop.Resolve
+      Language.Maypop.Search
       Language.Maypop.Syntax
       Language.Maypop.Unification
       Lib
