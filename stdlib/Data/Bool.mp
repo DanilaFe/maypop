@@ -20,3 +20,11 @@ or a b =
     | False -> b
     end 
 end
+
+not : Bool -> Bool where
+not b =
+    match b as _ in Bool _ return Bool with
+    | True -> False
+    | False -> True
+    end
+end
