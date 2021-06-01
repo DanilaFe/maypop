@@ -29,6 +29,7 @@ Prop has the type \\(\\text{Type}_0\\), and each type \\(\\text{Type}\_n\\) has 
 
 > nextSort :: Sort -> Sort
 > nextSort Prop = Type 0
+> nextSort Constraint = Type 0
 > nextSort (Type i) = Type $ i+1
 
 Type inference can fail, so let's define a type for any kind of error that can
@@ -230,6 +231,9 @@ a total order, but we do have a join semilattice.
 
 > joinS :: Sort -> Sort -> Sort
 > joinS Prop Prop = Prop
+> joinS Constraint Constraint = Constraint
+> joinS Constraint Prop = Type 0
+> joinS Prop Constraint = Type 0
 > joinS (Type i) (Type j) = Type $ max i j
 > joinS (Type i) _ = Type i
 > joinS _ (Type i) = Type i

@@ -94,7 +94,7 @@ repetitive.
 >     , identLetter = alphaNum <|> char '_' <|> char '\''
 >     , opStart = opBegin
 >     , opLetter = oneOf " ->="
->     , reservedNames = ["module", "import", "export", "qualified", "as", "data", "where", "forall", "prod", "let", "in", "Prop", "Type", "match", "in", "with", "return", "end"]
+>     , reservedNames = ["module", "import", "export", "qualified", "as", "data", "where", "forall", "prod", "let", "in", "Prop", "Constraint", "Type", "match", "in", "with", "return", "end"]
 >     , reservedOpNames = ["->", " "]
 >     , caseSensitive = True
 >     }
@@ -171,6 +171,9 @@ repetitive.
 > prop :: Parser Sort
 > prop = kw "Prop" >> return Prop
 >
+> constraint :: Parser Sort
+> constraint = kw "Constraint" >> return Constraint
+>
 > type_ :: Parser Sort
 > type_ = pure Type <* kw "Type" <*> nat
 >
@@ -204,7 +207,7 @@ repetitive.
 > term' :: Parser ParseTerm
 > term' = sort <|> prodT <|> abs <|> let_ <|> (Ref <$> ref) <|> case_ <|> paren term
 >     where
->         sort = Sort <$> (prop <|> type_)
+>         sort = Sort <$> (prop <|> constraint <|> type_)
 >         gen k f = pure (flip (foldr f)) <* k <*> param <* dot genParser <*> term
 >         prodT = gen prod Prod
 >         abs = gen lambda Abs

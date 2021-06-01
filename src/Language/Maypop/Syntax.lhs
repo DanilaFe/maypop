@@ -283,7 +283,7 @@ For convenience, we combine the references to the various
 sorts (\\(\\text{Prop}\\) and \\(\\text{Type}_n\\)) into a data type,
 `Sort`:
 
-> data Sort = Prop | Type Int deriving (Eq, Show)
+> data Sort = Constraint | Prop | Type Int deriving (Eq, Show)
 
 Having the term data type by itself is quite boring.
 There are a few helpful functions we can implement on terms.
