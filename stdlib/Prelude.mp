@@ -4,6 +4,7 @@ import Data.Pair (Pair(..), fst, snd, swap, curry, uncurry)
 import Data.Void (Void, absurd)
 import Data.Nat (Nat(..), plus)
 import Data.Bool (Bool(..), and, or)
+import Class.Eq (Eq(..))
 import Logic (And(..), Or(..), Not, Eq(..), replace)
 
 list1 : List Nat where
