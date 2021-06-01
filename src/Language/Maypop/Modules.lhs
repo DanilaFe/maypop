@@ -80,7 +80,7 @@ information.
 >     , dContent :: DefinitionContent
 >     }
 
-{{< todo >}}Explain this{{< /todo .}}
+{{< todo >}}Explain this{{< /todo >}}
 
 > function :: DefinitionContent -> Maybe Function
 > function (FunDef f) = Just f

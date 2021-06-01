@@ -15,7 +15,6 @@ Let's work on type inference a little.
 > import Language.Maypop.Unification hiding (substitute)
 > import Control.Monad.Reader
 > import Control.Monad.Except
-> import Control.Monad.Writer
 > import Control.Applicative
 > import Data.Bifunctor
 > import Data.Bool
