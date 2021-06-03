@@ -3,22 +3,32 @@ type class instances, without having to manually provide
 them.
 
 > {-# LANGUAGE FlexibleContexts #-}
+> {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+> {-# LANGUAGE MonoLocalBinds #-}
 > module Language.Maypop.Search where
 > import Language.Maypop.Syntax
+> import Language.Maypop.Checking
 > import Language.Maypop.Unification
 > import Language.Maypop.InfiniteList
 > import Language.Maypop.Modules
 > import Control.Applicative
 > import Control.Monad
+> import Control.Monad.Reader
+> import Control.Monad.Identity
+> import Control.Monad.Writer
 > import Control.Monad.State
+> import Control.Monad.Logic
+> import Control.Monad.Except
 > import qualified Data.Map as Map
+> import Data.Foldable
+> import Data.Void
 
 The first thing that we will do is define a fresh kind of
 parameter (for type safety). This will be a straightforward
 wrapper around `String` using `newtype`, so that conversions
 are easy, but explicit (and thus, it's harder to write incorrect code).
 
-> newtype Meta = MkMeta { unMeta :: String } deriving (Eq, Ord, Show)
+> newtype Meta = MkMeta { unMeta :: String } deriving (Eq, Ord, Show, Infinite)
 
 We will call this type `Meta` because we will attempt to interpret
 functions returning values of kind `Constraint` as being
@@ -105,23 +115,75 @@ bindings!
 Let's get back to some Haskell code. First of all, we clearly have a variant of terms that
 contain metavariables as parameters. We can define a type alias for this variant:
 
-> type MetaExpr = ParamTerm Meta
-
 {{< todo >}}Explain all this.{{< /todo >}}
 
-> data Rule a = Rule
->     { rPremises :: [ParamTerm a]
+> data RecipeParam a = Meta a | Search (ParamTerm a) deriving Show
+> 
+> data Recipe a = Recipe
+>     { rParams :: [RecipeParam a]
 >     , rConclusion :: ParamTerm a
->     }
+>     , rFunc :: Function
+>     } deriving Show
 >
-> type MetaRule = Rule Meta
+> validate :: MonadError TypeError m => ParamTerm (Either () Meta) -> m (ParamTerm Meta)
+> validate = traverse (either (const (throwError TypeError)) return)
 >
-> instantiate :: MonadUnify k (ParamTerm k) m => MetaRule -> m (Rule k)
-> instantiate mr = fst <$> runStateT (liftA2 Rule (mapM inst $ rPremises mr) (inst $ rConclusion mr)) Map.empty
+> intoMeta :: MonadError TypeError m => [ParamTerm (Either () Meta)] -> Term -> m (ParamTerm Meta)
+> intoMeta ps t = validate $ substituteMany 0 (reverse ps) (parameterize t)
+>
+> walkProd :: (MonadInfer Void m, MonadState (InfList Meta) m, MonadWriter [RecipeParam Meta] m) => [ParamTerm (Either () Meta)] -> Term -> m (ParamTerm Meta)
+> walkProd ps (Prod l r) = do
+>     lt <- infer l
+>     p <- case lt of
+>         Sort Constraint -> do
+>            lm' <- intoMeta ps l
+>            tell [Search lm']
+>            return $ Param $ Left ()
+>         _ -> do
+>            mv <- gets headInf <* modify tailInf
+>            tell [Meta mv]   
+>            return $ Param $ Right mv
+>     extend l $ walkProd (p:ps) r
+> walkProd ps t = do
+>     tt <- infer t
+>     case tt of
+>         Sort Constraint -> intoMeta ps t
+>         _ -> mzero
+>
+> intoRecipe :: Function -> Maybe (Recipe Meta)
+> intoRecipe f = either (const Nothing) makeRecipe mResult
 >     where
->         newVar m = do
->             v <- fresh
->             modify (Map.insert m v)
->             return v
->         getVar m = gets (Map.lookup m) >>= maybe (newVar m) return
->         inst = traverse getVar
+>         mResult = runInferE [] (runStateT (runWriterT (walkProd [] $ fFullType f)) infList)
+>         makeRecipe ((c, ps), _) = Just $ Recipe ps c f
+>
+> newVar :: (Ord mv, MonadUnify k v m, MonadState (Map.Map mv k) m) => mv -> m k
+> newVar m = do { v <- fresh; modify (Map.insert m v); return v }
+>
+> getVar :: (Ord mv, MonadUnify k v m, MonadState (Map.Map mv k) m) => mv -> m k
+> getVar mv = gets (Map.lookup mv) >>= maybe (newVar mv) return
+>
+> instantiate :: MonadUnify k (ParamTerm k) m => Recipe Meta -> m (Recipe k)
+> instantiate r = fst <$> runStateT (liftA3 Recipe rParams' rConclusion' (pure $ rFunc r)) Map.empty
+>     where
+>         rParams' = mapM instParam (rParams r)
+>         rConclusion' = instTerm (rConclusion r)
+>         instTerm = traverse getVar
+>         instParam (Meta a) = Meta <$> getVar a
+>         instParam (Search t) = Search <$> instTerm t
+>
+> runSearch :: [Recipe Meta] -> Term -> [ParamTerm String]
+> runSearch ps t = runIdentity $ observeAllT (runReaderT (runUnifyT (search (parameterize t))) ps)
+>
+> search :: (MonadLogic m, MonadUnify k (ParamTerm k) m, MonadReader [Recipe Meta] m) => ParamTerm k -> m (ParamTerm k)
+> search t = ask >>= asum . map (recipe t)
+>
+> recipe :: (MonadLogic m, MonadUnify k (ParamTerm k) m, MonadReader [Recipe Meta] m) => ParamTerm k -> Recipe Meta -> m (ParamTerm k)
+> recipe t r =
+>     do
+>         ir <- instantiate r
+>         unify t (rConclusion ir)
+>         params <- mapM findParam (rParams ir)
+>         return $ foldl App (Fun $ rFunc r) params
+>     where
+>         findParam (Meta a) = return (Param a)
+>         findParam (Search t) = search t
