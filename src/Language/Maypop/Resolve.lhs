@@ -70,23 +70,20 @@ parser (which may or may not be well-formed) into Maypop terms.
 >             let xt = maybe [] (return . (,) x . parameterize . snd) mcd
 >             local (setParams $ Map.fromList $ ts ++ xt) $ infer pt
 >             pt' <- reify pt
->             maybe (throwError TypeError) return $ strip x mt pt' 
+>             maybe (throwError TypeError) return
+>                 $ strip $ maybe pt' (flip (subst x) pt')
+>                 $ parameterize <$> mt
 >
-> strip :: Eq k => k -> Maybe S.Term -> S.ParamTerm k -> Maybe S.Term
-> strip k mrt = strip'
+> subst :: Eq k => k -> S.ParamTerm k -> S.ParamTerm k -> S.ParamTerm k
+> subst k rt = subst'
 >     where
->         strip' (S.Param k') | k == k' = mrt
->         strip' S.Param{} = Nothing
->         strip' (S.Ref i) = Just $ S.Ref i
->         strip' (S.Fun f) = Just $ S.Fun f
->         strip' (S.Abs l r) = liftA2 S.Abs (strip' l) (strip' r)
->         strip' (S.App l r) = liftA2 S.App (strip' l) (strip' r)
->         strip' (S.Let l r) = liftA2 S.Let (strip' l) (strip' r)
->         strip' (S.Prod l r) = liftA2 S.Prod (strip' l) (strip' r)
->         strip' (S.Sort s) = Just $ S.Sort s
->         strip' (S.Constr c ci) = Just $ S.Constr c ci
->         strip' (S.Ind i) = Just $ S.Ind i
->         strip' (S.Case t i tt ts) = liftA3 (flip S.Case i) (strip' t) (strip' tt) (mapM strip' ts)
+>         subst' (S.Param k') | k == k' = rt
+>         subst' (S.Abs l r) = S.Abs (subst' l) (subst' r)
+>         subst' (S.App l r) = S.App (subst' l) (subst' r)
+>         subst' (S.Let l r) = S.Let (subst' l) (subst' r)
+>         subst' (S.Prod l r) = S.Prod (subst' l) (subst' r)
+>         subst' (S.Case t i tt ts) = S.Case (subst' t) i (subst' tt) (map subst' ts)
+>         subst' t = t
 >
 > leadingInferred :: [(ParamType, a)] -> Int
 > leadingInferred = length . takeWhile ((==Inferred) . fst)

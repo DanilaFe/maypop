@@ -279,6 +279,25 @@ the `abusrd` function, so this re-interpretation is define as follows:
 > parameterizeAll :: [Term] -> [ParamTerm a]
 > parameterizeAll = map parameterize
 
+We can also go back from an arbitrary parameterized term,
+`ParamTerm a`, to a non-parameterized term `Term`. Of course,
+this is only possible if out input doesn't actually contain
+any parameters; the function can therefore fail, which
+we denote by a `Maybe`:
+
+> strip :: ParamTerm a -> Maybe Term
+> strip (Ref i) = Just $ Ref i
+> strip (Fun f) = Just $ Fun f
+> strip Param{} = Nothing
+> strip (Abs l r) = liftA2 Abs (strip l) (strip r)
+> strip (App l r) = liftA2 App (strip l) (strip r)
+> strip (Let l r) = liftA2 Let (strip l) (strip r)
+> strip (Prod l r) = liftA2 Prod (strip l) (strip r)
+> strip (Sort s) = Just $ Sort s
+> strip (Constr i ci) = Just $ Constr i ci
+> strip (Ind i) = Just $ Ind i
+> strip (Case t i tt ts) = liftA3 (flip Case i) (strip t) (strip tt) (mapM strip ts)
+
 For convenience, we combine the references to the various
 sorts (\\(\\text{Prop}\\) and \\(\\text{Type}_n\\)) into a data type,
 `Sort`:
