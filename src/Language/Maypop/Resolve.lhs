@@ -97,8 +97,10 @@ parser (which may or may not be well-formed) into Maypop terms.
 > fill rs t = do
 >     tt <- eval <$> (infer t >>= reify)
 >     ttt <- eval <$> (infer tt >>= reify)
+>     env <- asks ieRefs
 >     case (t, strip tt, ttt) of
 >         (S.Param{}, Just tt', S.Sort Constraint)
+>             | [x] <- findIndices ((==eval tt) . eval) env -> return (S.Ref x)
 >             | Right rt <- runSearch rs tt' -> return (parameterize rt)
 >         _ -> return t
 > 
