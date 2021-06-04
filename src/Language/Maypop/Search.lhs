@@ -22,6 +22,7 @@ them.
 > import qualified Data.Map as Map
 > import Data.Foldable
 > import Data.Void
+> import Data.Maybe
 
 The first thing that we will do is define a fresh kind of
 parameter (for type safety). This will be a straightforward
@@ -156,6 +157,12 @@ contain metavariables as parameters. We can define a type alias for this variant
 >         mResult = runInferE [] (runStateT (runWriterT (walkProd [] $ fFullType f)) infList)
 >         makeRecipe ((c, ps), _) = Just $ Recipe ps c f
 >
+> intoRecipies :: GlobalScope -> [Recipe Meta]
+> intoRecipies = catMaybes . map (into . eVariant) . Map.elems . sQualified
+>     where
+>         into (FunExport f) = intoRecipe f
+>         into _ = Nothing
+>
 > newVar :: (Ord mv, MonadUnify k v m, MonadState (Map.Map mv k) m) => mv -> m k
 > newVar m = do { v <- fresh; modify (Map.insert m v); return v }
 >
@@ -171,8 +178,16 @@ contain metavariables as parameters. We can define a type alias for this variant
 >         instParam (Meta a) = Meta <$> getVar a
 >         instParam (Search t) = Search <$> instTerm t
 >
-> runSearch :: [Recipe Meta] -> Term -> [ParamTerm String]
-> runSearch ps t = runIdentity $ observeAllT (runReaderT (runUnifyT (search (parameterize t))) ps)
+> data SearchError = NoSolutions | Overlapping | Ambiguous deriving Show
+>
+> runSearch :: [Recipe Meta] -> Term -> Either SearchError Term
+> runSearch ps t = validateSearch $ runIdentity $ observeAllT (runReaderT (runUnifyT doSearch) ps)
+>     where doSearch = search (parameterize t) >>= reify
+>
+> validateSearch :: [ParamTerm String] -> Either SearchError Term
+> validateSearch [] = throwError NoSolutions
+> validateSearch [t] = maybe (throwError Ambiguous) return $ strip t
+> validateSearch _ = throwError Overlapping
 >
 > search :: (MonadLogic m, MonadUnify k (ParamTerm k) m, MonadReader [Recipe Meta] m) => ParamTerm k -> m (ParamTerm k)
 > search t = ask >>= asum . map (recipe t)

@@ -11,10 +11,13 @@ parser (which may or may not be well-formed) into Maypop terms.
 > import qualified Language.Maypop.Syntax as S
 > import Language.Maypop.Parser
 > import Language.Maypop.Unification
+> import Language.Maypop.Eval
+> import Language.Maypop.Search hiding (instantiate)
 > import Language.Maypop.Checking hiding (NotInductive)
 > import Language.Maypop.Modules hiding (function)
 > import Control.Applicative
 > import Control.Monad.Reader
+> import Control.Monad.Identity
 > import Control.Monad.State
 > import Control.Monad.Except
 > import Control.Monad.Writer
@@ -61,29 +64,50 @@ parser (which may or may not be well-formed) into Maypop terms.
 >     do
 >         env <- parameterizeAll <$> asks reEnv
 >         cd <- asks reCurrentDef
->         let e = runInferU (InferEnv env Map.empty) (elab cd)
+>         rs <- intoRecipies <$> gets rsScope
+>         let e = runInferU (InferEnv env Map.empty) (elab rs cd)
 >         liftEither $ first ElaborateFailed e
 >     where
->         elab :: Maybe (ParseDef, S.Term) -> InferU String S.Term
->         elab mcd = runUnifyT $ do
+>         elab :: [Recipe Meta] -> Maybe (ParseDef, S.Term) -> InferU String S.Term
+>         elab rs mcd = runUnifyT $ do
 >             ((x, pt), ts) <- runWriterT $ instantiate rt
 >             let xt = maybe [] (return . (,) x . parameterize . snd) mcd
->             local (setParams $ Map.fromList $ ts ++ xt) $ infer pt
->             pt' <- reify pt
->             maybe (throwError TypeError) return
->                 $ strip $ maybe pt' (flip (subst x) pt')
->                 $ parameterize <$> mt
+>             local (setParams $ Map.fromList $ ts ++ xt) $ do
+>                 infer pt
+>                 pt' <- reify pt >>= fillAll rs
+>                 maybe (throwError TypeError) return
+>                     $ strip $ maybe pt' (flip (subst x) pt')
+>                     $ parameterize <$> mt
 >
-> subst :: Eq k => k -> S.ParamTerm k -> S.ParamTerm k -> S.ParamTerm k
-> subst k rt = subst'
+> replaceParams :: Monad m => (k -> m (S.ParamTerm k)) -> S.ParamTerm k -> m (S.ParamTerm k)
+> replaceParams f = replace
 >     where
->         subst' (S.Param k') | k == k' = rt
->         subst' (S.Abs l r) = S.Abs (subst' l) (subst' r)
->         subst' (S.App l r) = S.App (subst' l) (subst' r)
->         subst' (S.Let l r) = S.Let (subst' l) (subst' r)
->         subst' (S.Prod l r) = S.Prod (subst' l) (subst' r)
->         subst' (S.Case t i tt ts) = S.Case (subst' t) i (subst' tt) (map subst' ts)
->         subst' t = t
+>         replace (S.Param k) = f k
+>         replace (S.Abs l r) = liftA2 S.Abs (replace l) (replace r)
+>         replace (S.App l r) = liftA2 S.App (replace l) (replace r)
+>         replace (S.Let l r) = liftA2 S.Let (replace l) (replace r)
+>         replace (S.Prod l r) = liftA2 S.Prod (replace l) (replace r)
+>         replace (S.Case t i tt ts) = liftA3 (`S.Case` i) (replace t) (replace tt) (mapM replace ts)
+>         replace t = return t
+>
+> fillAll :: (MonadInfer k m, MonadUnify k (S.ParamTerm k) m) => [Recipe Meta] -> S.ParamTerm k -> m (S.ParamTerm k)
+> fillAll rs = replaceParams (fill rs . S.Param)
+>
+> fill :: (MonadInfer k m, MonadUnify k (S.ParamTerm k) m) => [Recipe Meta] -> S.ParamTerm k -> m (S.ParamTerm k)
+> fill rs t = do
+>     tt <- eval <$> (infer t >>= reify)
+>     ttt <- eval <$> (infer tt >>= reify)
+>     case (t, strip tt, ttt) of
+>         (S.Param{}, Just tt', S.Sort Constraint)
+>             | Right rt <- runSearch rs tt' -> return (parameterize rt)
+>         _ -> return t
+> 
+> subst :: Eq k => k -> S.ParamTerm k -> S.ParamTerm k -> S.ParamTerm k
+> subst k rt = runIdentity . replaceParams subst'
+>     where
+>         subst' k'
+>             | k == k' = return rt
+>             | otherwise = return (S.Param k')
 >
 > leadingInferred :: [(ParamType, a)] -> Int
 > leadingInferred = length . takeWhile ((==Inferred) . fst)
