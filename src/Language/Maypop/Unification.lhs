@@ -23,6 +23,8 @@ used for type inference.
 > import Data.Maybe
 > import Data.Bifunctor
 > import Data.Void
+> import Data.Foldable
+> import Debug.Trace
 
 We'll define an MTL-style typeclass that encapsulates unification functionality.
 Since
@@ -60,7 +62,7 @@ are bound to. For this, we also define a `substitute` method.
 > class Unifiable k v | v -> k where
 >     unify :: MonadUnify k v m => v -> v -> m v
 >     occurs :: k -> v -> Bool
->     substitute :: k -> v -> v -> v
+>     substitute :: MonadUnify k v m => k -> v -> v -> m v
 
 With the three basic `Unifiable` operations in place, we can define
 some helper functions. As we said before, unification should fail
@@ -76,8 +78,8 @@ variables and their bindings. We can define a little function that uses
 the basic `substitute` method to apply an entire map (in the form of a list
 of pairs) of unification bindings to our final value.
 
-> substituteAll :: Unifiable k v => [(k, v)] -> v -> v
-> substituteAll m v = foldr (uncurry substitute) v m
+> substituteAll :: (MonadUnify k v m, Unifiable k v) => [(k, v)] -> v -> m v
+> substituteAll m v = foldrM (uncurry substitute) v m
 
 Next, let's define a monad transformer satisfying `MonadUnify`, which we'll call `UnifyT`. This will be a simple
 wrapper around the `StateT` monad; however, __it will not
@@ -115,6 +117,12 @@ For this, we need `WriterT` to propagate `MonadUnify`:
 >     reify v = lift $ reify v
 >
 > instance MonadUnify k v m => MonadUnify k v (StateT s m) where
+>     fresh = lift $ fresh
+>     bind k v = lift $ bind k v
+>     merge k1 k2 = lift $ merge k1 k2
+>     reify v = lift $ reify v
+>
+> instance MonadUnify k v m => MonadUnify k v (ReaderT r m) where
 >     fresh = lift $ fresh
 >     bind k v = lift $ bind k v
 >     merge k1 k2 = lift $ merge k1 k2
@@ -160,12 +168,17 @@ correctly: for a map \\(\\{k_1\\mapsto k_2\\}\\), the term
 we introduce a binding \\(k_1 \\mapsto k_2\\), we will
 take care to rewrite terms like \\(k_1\\) into \\(k_2\\).
 
-> substituteInternal :: (Ord k, Monad m, Unifiable k v) => Set.Set k -> v -> UnifyT k v m ()
-> substituteInternal ks v = MkUnifyT $ do
->     bound <- gets sBound
+> substituteInternal :: (Ord k, Infinite k, MonadPlus m, Unifiable k v) => Set.Set k -> v -> UnifyT k v m ()
+> substituteInternal ks v = do
+>     bound <- MkUnifyT $ gets sBound
 >     let lks = Set.toList ks
->     let bound' = foldr (\k -> Map.map (second $ fmap $ substitute k v)) bound lks
->     modify $ \s -> s { sBound = bound' }
+>     let entry k m
+>          | Just (ks', Just v') <- Map.lookup k m = do
+>              sv <- substitute k v v'
+>              return $ Map.insert k (ks', Just sv) m
+>          | otherwise = return m
+>     bound' <- foldrM entry bound lks
+>     MkUnifyT $ modify $ \s -> s { sBound = bound' }
 
 Finally, we'll define a `MonadUnify` instance for `UnifyT`. In order
 to make map lookups possible in `UnificationState`, we place an additional
@@ -178,11 +191,12 @@ is polymorphic over a generic monad `m`.
 >         put us >> return k
 >     bind k v = do
 >         (ks, mv) <- lookupK k
->         mapM (`guardOccurs` v) $ Set.toList ks
->         v' <- maybe (return v) (unify v) mv
->         syncKeys ks (Just v')
->         substituteInternal ks v'
->         return v'
+>         v' <- reify v
+>         mapM (`guardOccurs` v') $ Set.toList ks
+>         v'' <- maybe (return v') (unify v') mv
+>         syncKeys ks (Just v'')
+>         substituteInternal ks v''
+>         return v''
 >     merge k1 k2 = do
 >         (ks1, mv1) <- lookupK k1         
 >         (ks2, mv2) <- lookupK k2
@@ -193,7 +207,7 @@ is polymorphic over a generic monad `m`.
 >                 syncKeys ks (Just v)
 >                 substituteInternal ks v
 >             _ -> syncKeys ks $ mv1 <|> mv2
->     reify v = (`substituteAll` v) <$> (MkUnifyT $ gets bindingList)
+>     reify v = (MkUnifyT $ gets bindingList) >>= (`substituteAll` v) 
 
 Last but not least, we define a data type for the unification state.
 This consists of two things:
@@ -254,6 +268,130 @@ For cases like `App`, `Abs`, and `Prod`, two recursive calls to `unify` suffice;
 for more complex terms such as `Case`, we have to do testing to ensure that the non-`Term`
 data matches, too.
 
+> data ContextTerm k = Valid (ParamTerm k) | Invalid deriving Show
+>
+> data Context k = Context
+>     { ctxEnv :: [ContextTerm k]
+>     , ctxTerm :: ParamTerm k
+>     } deriving Show
+>
+> commonPrefix :: (Eq k, MonadUnify k (Context k) m) => [ContextTerm k] -> [ContextTerm k] -> m [ContextTerm k]
+> commonPrefix l1 l2 = compare (reverse l1) (reverse l2) []
+>     where
+>         compare (Invalid:xs) (Invalid:ys) acc = compare xs ys (Invalid:acc)
+>         compare ((Valid t1):xs) ((Valid t2):ys) acc =
+>             unifyTerm acc t1 t2 >>= compare xs ys . (:acc) . Valid
+>         compare _ _ acc = return acc
+>
+> strengthen :: (Show k, MonadPlus m) => Int -> ParamTerm k -> m (ParamTerm k)
+> strengthen n t = trace ("Strengthening... " ++ show n ++ " " ++ show t) $ runReaderT (transform op t) 0
+>     where op k = ask >>= \x -> if k - x >= n then return $ Ref (k-n) else mzero
+
+> weaken :: Int -> ParamTerm k -> ParamTerm k
+> weaken = offsetFree
+>
+> matchContext :: (Show k, Eq k, MonadUnify k (Context k) m) => [ContextTerm k] -> Context k -> m (ParamTerm k)
+> matchContext pr c = strengthen (length (ctxEnv c) - length pr) (ctxTerm c)
+>
+> instance (Show k, Eq k) => Unifiable k (Context k) where
+>     unify c1 c2 = do
+>         prefix <- commonPrefix (ctxEnv c1) (ctxEnv c2)
+>         traceM $ "Prefix: " ++ show prefix
+>         t1 <- matchContext prefix c1
+>         t2 <- matchContext prefix c2
+>         traceM $ "Done matching contexts."
+>         t <- unifyTerm prefix t1 t2
+>         return $ Context prefix t
+>     occurs k ctx = any occ (ctxEnv ctx) || occurs k (ctxTerm ctx)
+>         where
+>             occ Invalid = False
+>             occ (Valid t) = occurs k t
+>     substitute k c1 c2 =
+>         do
+>             env' <- walk (ctxEnv c2) []
+>             term' <- substituteTerm k env' c1 (ctxTerm c2)
+>             return $ Context env' term'
+>         where
+>             subst _ Invalid = return Invalid
+>             subst acc (Valid t) = Valid <$> substituteTerm k acc c1 t
+>             walk (x:xs) acc = subst acc x >>= walk xs . (:acc)
+>             walk _ acc = return acc
+>
+> valid :: MonadReader [ContextTerm k] m => ParamTerm k -> m a -> m a
+> valid t = local (Valid t:)
+>
+> invalid :: MonadReader [ContextTerm k] m => m a -> m a
+> invalid = local (Invalid:)
+>
+> invalidN :: MonadReader [ContextTerm k] m => Int -> m a -> m a
+> invalidN n m = foldr ($) m $ replicate n invalid
+>
+> constr :: MonadReader [ContextTerm k] m => Constructor -> m a -> m a
+> constr c = invalidN (length (cParams c))
+>
+> branches :: MonadReader [ContextTerm k] m => Inductive -> [m a] -> m [a]
+> branches i = sequence . zipWith constr (iConstructors i)
+>
+> return_ :: MonadReader [ContextTerm k] m => Inductive -> m a -> m a
+> return_ i = invalidN (1 + length (iArity i))
+>
+> substituteTerm :: (Eq k, Show k, MonadUnify k (Context k) m) => k -> [ContextTerm k] -> Context k -> ParamTerm k -> m (ParamTerm k)
+> substituteTerm k env ctx t = runReaderT (subst' t) env
+>     where
+>         subst' (Param k') | k == k' = do
+>             env' <- ask
+>             guard $ length env' >= length (ctxEnv ctx)
+>             prefix <- commonPrefix env' (ctxEnv ctx)
+>             ct <- matchContext prefix ctx
+>             return ct
+>         subst' (Abs l r) = do
+>             l' <- subst' l
+>             Abs l' <$> (valid l' $ subst' r)
+>         subst' (App l r) = liftA2 App (subst' l) (subst' r)
+>         subst' (Let l r) = liftA2 Let (subst' l) (subst' r)
+>         subst' (Prod l r) = do
+>             l' <- subst' l
+>             Prod l' <$> (valid l' $ subst' r)
+>         subst' (Case t i tt ts) = do
+>             t' <- subst' t
+>             tt' <- return_ i $ subst' tt
+>             ts' <- branches i $ map subst' ts
+>             return $ Case t' i tt' ts'
+>         subst' t = return t
+>
+> unifyTerm :: (Eq k, MonadUnify k (Context k) m) => [ContextTerm k] -> ParamTerm k -> ParamTerm k -> m (ParamTerm k)
+> unifyTerm ctx t1 t2 = runReaderT (unify' t1 t2) ctx
+>     where
+>         unify' (Ref x1) (Ref x2) | x1 == x2 = return $ Ref x1
+>         unify' (Fun f1) (Fun f2) | f1 == f2 = return $ Fun f1
+>         unify' (Abs l1 r1) (Abs l2 r2) = do
+>             l <- unify' l1 l2
+>             r <- valid l $ unify' r1 r2
+>             return $ Abs l r
+>         unify' (App l1 r1) (App l2 r2) = liftA2 App (unify' l1 l2) (unify' r1 r2)
+>         unify' (Let l1 r1) (Let l2 r2) = liftA2 Let (unify' l1 l2) (invalid $ unify' r1 r2)
+>         unify' (Prod l1 r1) (Prod l2 r2) = do
+>             l <- unify' l1 l2
+>             r <- valid l $ unify' r1 r2
+>             return $ Prod l r
+>         unify' (Sort s1) (Sort s2) | s1 == s2 = return $ Sort s1
+>         unify' (Constr ind1 ci1) (Constr ind2 ci2)
+>             | ci1 == ci2 && ind1 == ind2 = return $ Constr ind1 ci1
+>         unify' (Ind i1) (Ind i2) | i1 == i2 = return $ Ind i1
+>         unify' (Case t1 ind1 tt1 ts1) (Case t2 ind2 tt2 ts2)
+>             | ind1 == ind2 = do
+>                 t <- unify' t1 t2
+>                 tt <- return_ ind1 $ unify' tt1 tt2
+>                 ts <- branches ind1 $ zipWith unify' ts1 ts2
+>                 return $ Case t ind1 tt ts
+>         unify' (Param k1) (Param k2) = do
+>             k <- fresh
+>             env <- ask
+>             bind k1 (Context env (Param k)) >> merge k1 k2 >> return (Param k1)
+>         unify' (Param k1) t = ask >>= bind k1 . (`Context` t) >> return t
+>         unify' t (Param k2) = ask >>= bind k2 . (`Context` t) >> return t
+>         unify' _ _ = mzero
+>
 > instance Eq k => Unifiable k (ParamTerm k) where
 >     unify t1 t2 = unify' (eval t1) (eval t2)
 >         where
@@ -274,7 +412,7 @@ data matches, too.
 >             unify' t (Param k2) = bind k2 t
 >             unify' _ _ = mzero
 >     occurs = elem
->     substitute k v = subst
+>     substitute k v = return . subst
 >         where
 >             subst (Abs l r) = Abs (subst l) (subst r)
 >             subst (App l r) = App (subst l) (subst r)
