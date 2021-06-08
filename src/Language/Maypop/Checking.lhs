@@ -42,7 +42,11 @@ come up.
 >     | UnknownConstructor
 >     deriving Show
 
-{{< todo >}} Explain this {{< /todo >}}
+Our implementation of unification and `MonadUnify` relies on `MonadPlus`.
+However, our usual error reporting mechanism is `MonadError`, specifically
+`ErrorT`. These two aren't effortlessly compatible; however, there _does_
+exist a `MonadPlus` instance for `ErrrorT`, when the type of errors
+is a `Monoid`. We thus declare the following two (law-violating) instances:
 
 > instance Semigroup TypeError where
 >     l <> _ = l
@@ -69,33 +73,128 @@ of parameters that our terms are parameterized by.
 
 Finally, on to the type inference function. We use the `MonadReader`
 typeclass to require read-only access to the local environment \\(\\Gamma\\).
+This function is so complicated that we should go through it case-by-case.
 
 > infer :: MonadInfer k m => ParamTerm k -> m (ParamTerm k)
+
+When we are inferring the type of a DeBrujin index, all we need
+to do is look in the current context to see what the index
+corresponds to. It's possible that the index corresponds to
+nothing; in this case, we throw the `FreeVariable` type error.
+
 > infer (Ref n) = nth n <$> ask >>= maybe (throwError (FreeVariable n)) return
+
+The type of a function is simply its full type. This type is initially
+a `Term`, but, since we're performing inference over potentially parameterized
+terms, we need to call `parameterize`. The case for fixpoints is pretty much identical; the decreasing
+argument is irrelevant to a function's type.
+
 > infer (Fun f) = return $ parameterize $ fFullType f
 > infer (Fix f) = return $ parameterize $ fFullType $ fxFun f
+
+The case for parameters must be present, but I'm not currently
+sure what the best way of handling it is. For now, it remains
+unimplemented.
+
 > infer (Param p) = undefined -- TODO
+
+The type of a lambda abstraction is a product type;
+the first component of `Abs` is the input type,
+so we include it directly. The return type must
+be computed from the lambda abstraction body. Since
+the argument to the lambda abstraction is also available
+in the body, we must extend the environment with its type.
+The `extend` helper function is defined below, and it ensures
+the validity of `t` before adding it to the context.
+
 > infer (Abs t b) = Prod t <$> extend t (infer b)
+
+In the application case, we infer the types of both the left-
+and right-hand side terms. We require the left term to
+be a product type (we enforce this using the `inferP` helper).
+Once the two types are computed, we compare (using unification)
+the function's expected input type and the type of the argument,
+and, if they match, return the function's return type. There's
+a little trick here: the return type of the function may depend
+on value of the argument, so we perform substitution to provide
+it this value.
+
 > infer (App f a) = do
 >     (ta, tb) <- inferP f
 >     targ <- infer a
 >     unify (eval ta) (eval targ)
 >     reify $ substitute 0 a tb
+
+A let expression is not explicitly decorated with types; we thus
+infer the type of newly introduced variable (in the `let` portion)
+and then use it to extend the environment in which the returned
+expression (the `in` portion) is typechecked.
+
 > infer (Let l i) = infer l >>= flip extend (infer i)
+
+The product rule is somewhat tricky because the exact type depends
+on the sort of the return type. The `Prop` sort is impredicative,
+which means that it can actually refer to itself, and to "higher level"
+sorts like `Type 0`, `Type 1`, and so on. Thus, if the sort of
+the return type is `Prop`, it's fine and dandy for us to type the
+entire product type as `Prop`. However, `Type n` is predicative; it
+can't refer to itself, and anything accepting values such as `Type 0`
+{{< sidenote "right" "russel-note" "cannot itself be of sort" >}}
+This aligns closely with Bertrand Russel's work, _Mathematical Logic as
+Based on The Theory of Types_, where he writes: "Thus, whatever contains an
+apparent variable must be of a different type from the possible values
+of that variable; we will say that it is of a _higher_ type".
+{{< /sidenote >}}`Type 0`, but something of at least sort `Type 1`.
+We implement this as follows:
+
 > infer (Prod a b) = extend' a $ \ua -> inferS b >>= \ub -> return $ Sort $
 >     case ub of
 >         Prop -> Prop
 >         t -> joinS ua t
+
+The type of a sort is simply the next largest sort. We use a helper
+function `nextSort`, defined below, to simplify the code here.
+
 > infer (Sort u) = return $ Sort $ nextSort u
+
+A constructor of an inductive type `i` accepts not only its
+own parameters, but also the parameters of the inductive data
+type itself. Furthermore, its return type actually contains
+the inductive data type's parameters. Thus, we have to
+do quite a bit of bookkeeping.
+
+The most complicated
+part is the return type. It is at the end of a chain
+of product types, with the first few product types serving to accept 
+the inductive data type's parameters, and the subsequent few products
+to accept the parameters of the constructor. The first
+order of business is to re-iterate the inductive data type's
+parameters in the return type. They are behind `length (cParams c)`
+constructor parameters, and we thus compute their indices by adding
+that number to `0`, `1`, and so on. This is done by `cParamRefs`
+and `cIndParams`. The remaining arguments to the `Inductive` type
+constructor are the indices of the particular construtor (`cIndices c`),
+which require no further wrangling.
+
+Having thus computed the return type, we place it at the end of a chain
+of products (as promised) with a straightforward right fold. Tying this
+all together, we handle the potential for an invalid constructor reference
+(with an invalid constructor index `ci`) using `withConstr` and `mConstr`.
+
 > infer (Constr i ci) = withConstr $
->     \c -> return $ foldr Prod (parameterize $ cReturn c) (parameterizeAll $ iParams i ++ cParams c)
+>     \c -> return $ parameterize $ foldr Prod (cReturn c) (iParams i ++ cParams c)
 >     where
 >         mConstr = nth ci $ iConstructors i
 >         withConstr f = maybe (throwError UnknownConstructor) f mConstr
 >         cParamRefs c = map (+length (cParams c)) [0..length (iParams i) -1]
 >         cIndParams c = map Ref $ reverse $ cParamRefs c
 >         cReturn c = foldl App (Ind i) $ cIndParams c ++ cIndices c
-> infer (Ind i) = return $ foldr Prod (Sort $ iSort i) $ (parameterizeAll $ iParams i ++ iArity i)
+
+Things are much simpler for an inductive data type itself; it's a type
+constructor returning its sort (`iSort i`), taking as arguments its
+parameters and indices.
+
+> infer (Ind i) = return $ parameterize $ foldr Prod (Sort $ iSort i) $ iParams i ++ iArity i
 > infer (Case t i tt ts) = do
 >     (i', is) <- inferI t
 >     guardE TypeError $ i == i'
@@ -122,7 +221,7 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >
 > runInfer :: Term -> Either TypeError Term
 > runInfer = runInfer' []
-
+>
 > runInfer' :: [Term] -> Term -> Either TypeError Term
 > runInfer' ts = runInferE ts . infer
 

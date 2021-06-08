@@ -1,8 +1,5 @@
 Here, I'll define what a Maypop "term" is.
 
-{{< todo >}}Inductive stuff has names? How does equality work?{{< /todo >}}
-{{< todo >}}Introduce binders.{{< /todo >}}
-
 > {-# LANGUAGE FlexibleContexts #-}
 > {-# LANGUAGE FlexibleInstances #-}
 > {-# LANGUAGE DeriveFunctor #-}
@@ -17,7 +14,6 @@ Here, I'll define what a Maypop "term" is.
 > import Data.Void
 > import Data.Bifunctor
 > import qualified Data.Set as Set
->
 
 When writing a program in Maypop, a user will likely put down two types
 of definitions: data types (pair, list, optional) and code (functions).
@@ -52,9 +48,9 @@ We could then use `t` to refer to the type of elements in both the
 `Cons` and `Nil` constructors.
 
 Next up is the arity. Our inductive definition, in general, defines
-a type family indexed by terms in our language. Unlike the parameters,
+a [type family indexed by terms](http://docs.idris-lang.org/en/latest/tutorial/typesfuns.html#vectors) in our language. Unlike the parameters,
 the indexing terms _depend on the constructors_ of the data! For example,
-in a `Vec` data type (like [the one in Idris](http://docs.idris-lang.org/en/latest/tutorial/typesfuns.html#vectors)),
+in a `Vec` data type (like the one in Idris, see the above link),
 the `Nil` constructor will have type `Vec Int 0`, but the `Cons` constructor
 will produce a value of type `Vec Int (n+1)`. We thus cannot count the length
 as a _parameter_ (as all contructors would then have to have the same length),
@@ -92,11 +88,9 @@ a constructor must have its own parameters (`cParams`), the index terms
 that it applies to the data type (`cIndices`), and it would be good
 (for debugging at the very least) for it to have a name (`cName`).
 An entire data type declaration must have its shared parameters
-(`iParams`), it's arity (`iArity`, which we represent as just the
+(`iParams`), its arity (`iArity`, which we represent as just the
 list of argument terms `B1` through `Bm`), the sort that it returns (`iSort`),
 a list of its constructors (`iConstructors`) and, once again, a name (`iName`).
-
-{{< todo >}}Explain this. {{< /todo >}}
 
 > data Constructor = Constructor
 >     { cParams :: [Term]
@@ -118,7 +112,10 @@ just compare their names.
 > instance Eq Inductive where
 >     i1 == i2 = iName i1 == iName i2
 
-{{< todo >}}Debug! Delete below instance. {{< /todo >}}
+To be able to print (via `Show`) our various data structures,
+it helps to either implement or derive `Show` for many of our
+data structures. In the case of an inductive data type, we
+simply show its name:
 
 > instance Show Inductive where
 >     show = iName
@@ -149,6 +146,8 @@ definition. This isn't particularly difficult; we need only the name,
 arity (number of parameters), return type, and body of the function. Much
 like we did with inductive types, we represent the arity by a list of types,
 to ensure that every one of the function's arguments _actually_ has a type.
+Representing arity in this way will also help us turn function definitions
+into equivalent lambda abstractions.
 
 > data Function = Function
 >     { fName :: String
@@ -156,11 +155,6 @@ to ensure that every one of the function's arguments _actually_ has a type.
 >     , fType :: Term
 >     , fBody :: Term
 >     }
-
-{{< todo >}}Debug! Delete below instance. {{< /todo >}}
-
-> instance Show Function where
->     show = fName
 
 It's always good to have in hand the _whole_ type of the function (`Args -> Return`).
 This is a straightforward right-associative fold:
@@ -182,8 +176,14 @@ an `Eq` instance based on its name:
 > instance Eq Function where
 >     f1 == f2 = fName f1 == fName f2
 
+When we are trying to print out a function, we typically only want its
+name. Let's define a `Show` instance accordingly.
+
+> instance Show Function where
+>     show = fName
+
 The Calculus of Inductive Constructions gives special treatment to recursive (fixpoint)
-functions. This is because the evaluation rule of \\(\\delta\\)-reduction can cause serious trouble
+functions. This is because the evaluation rule of [\\(\\delta\\)-reduction](https://coq.github.io/doc/v8.9/refman/language/cic.html#delta-reduction) can cause serious trouble
 with functions that contain their own name. In brief, \\(\\delta\\)-reduction substitutes
 references to functions and constants with their definitions. If a function's definition
 contains a reference to itself, this reference can be replaced by the function's body
@@ -269,6 +269,12 @@ for the second constructor).
 >
 > type Term = ParamTerm Void
 
+For convenience, we combine the references to the various
+sorts (\\(\\text{Prop}\\) and \\(\\text{Type}_n\\)) into a data type,
+`Sort`:
+
+> data Sort = Prop | Type Int deriving (Eq, Show)
+
 If we have a term without parameters (`Term`), we can always
 interpret it as a term that may contain parameters. We can always
 trivially translate from `Void` into any other type `a` using
@@ -276,15 +282,12 @@ the `abusrd` function, so this re-interpretation is define as follows:
 
 > parameterize :: Term -> ParamTerm a
 > parameterize = fmap absurd
->
+
+It's not uncommon to have to parameterize an entire list of
+terms, for which we provide another helper function as follows:
+
 > parameterizeAll :: [Term] -> [ParamTerm a]
 > parameterizeAll = map parameterize
-
-For convenience, we combine the references to the various
-sorts (\\(\\text{Prop}\\) and \\(\\text{Type}_n\\)) into a data type,
-`Sort`:
-
-> data Sort = Prop | Type Int deriving (Eq, Show)
 
 Having the term data type by itself is quite boring.
 There are a few helpful functions we can implement on terms.
@@ -302,7 +305,7 @@ We keep track of it accordingly.
 
 Before we get to that, a quick aside. There will be several operations
 in our language in which we'll need to keep track of the number
-of surrounding binders. When case expressions come into play,
+of surrounding [binders](https://en.wikipedia.org/wiki/Lambda_calculus#Free_and_bound_variables). When case expressions come into play,
 there are even more cases (no pun intended) in which we need
 to increment our "counter" of variables. Rather than repeatedly
 implementing this functionality -- perhaps with slight changes --
@@ -314,8 +317,10 @@ which we will represent with `MonadReader Int`. Then, we can
 define a generic operation that transforms __only free variable terms__,
 with other possible monadic effects captured by the arbitrary monad `m`:
 
-> transform :: MonadReader Int m => (Int -> m (ParamTerm a)) -> ParamTerm a -> m (ParamTerm a)
-> transform f = trans
+> transform
+>     :: MonadReader Int m
+>     => (Int -> m (ParamTerm a)) -> ParamTerm a -> m (ParamTerm a)
+> transform f = local (const 0) . trans
 >     where
 >         trans (Ref m) = ask >>= \x -> if m >= x then f m else return (Ref m)
 >         trans (Abs t1 t2) = liftA2 Abs (trans t1) (deepen 1 $ trans t2)
@@ -353,7 +358,10 @@ in a helper function `safeDec`:
 > safeDec n x b i | i > n + x = i - b
 > safeDec _ _ _ i = i
 
-Finally, we can define substitution:
+Finally, we can define substitution. Given a DeBrujin index `i` with
+`x` surrounding binders, if `i-x` is equal to the target substitution
+index `n`, we perform substitution; otherwise, we perform the "safe decrement"
+operation described earlier.
 
 > substitute :: Int -> ParamTerm a -> ParamTerm a -> ParamTerm a
 > substitute n t r = runReader (transform op r) 0
@@ -450,7 +458,7 @@ In case we need multiple names, we can define `popNames` as follows:
 
 We now have ways to generate fresh names; what remains is a way to
 make these names available to our pretty printer. While the `State`
-mond will be used to generate more and more fresh variable, a `Reader`
+monad will be used to generate more and more fresh variable, a `Reader`
 monad will be used to represent the names corresponding to each DeBrujin
 index. This is simple enough to represent as a stack of names:
 the top name on the stack corresponds to DeBrujin index 0, the
@@ -525,6 +533,8 @@ And now, the pretty printer itself.
 >             paramNames <- popNames (length $ cParams c)
 >             st <- extendNames paramNames (prettyM 0 t)
 >             return $ intercalate " " (cName c : paramNames) ++ " -> " ++ st
+
+{{< sidenote "right" "voila-note" "Et Voila." >}}In homage to the last page of <a href="https://babel.ls.fi.upm.es/~pablo/Papers/Notes/f-fw.pdf">Nogueira, 2006</a>{{</ sidenote >}}
 
 In the above, we used a function `nth`. This is just a safe version of the `(!!)` operator
 that is built into Haskell. It'll come in handy in other modules, too.
