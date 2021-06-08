@@ -66,8 +66,8 @@ can define a trivial type class instance, `MonadInfer k`, which implies
 all of the other common constraints. The `k` in this definition is the type
 of parameters that our terms are parameterized by.
 
-> class (Ord k, MonadReader (InferEnv k) m, MonadError TypeError m, MonadUnify k (ParamTerm k) m) => MonadInfer k m where
-> instance (Ord k, MonadReader (InferEnv k) m, MonadError TypeError m, MonadUnify k (ParamTerm k) m) => MonadInfer k m where
+> class (Ord k, MonadReader (InferEnv k) m, MonadError TypeError m, MonadUnify k (Context k) m) => MonadInfer k m where
+> instance (Ord k, MonadReader (InferEnv k) m, MonadError TypeError m, MonadUnify k (Context k) m) => MonadInfer k m where
 
 {{< todo >}}Explain this {{< /todo >}}
 
@@ -85,6 +85,19 @@ of parameters that our terms are parameterized by.
 Finally, on to the type inference function. We use the `MonadReader`
 typeclass to require read-only access to the local environment \\(\\Gamma\\).
 
+> getCtxEnv :: MonadInfer k m => m [ContextTerm k]
+> getCtxEnv = map Valid <$> asks ieRefs
+> 
+> unifyTerms :: MonadInfer k m => ParamTerm k -> ParamTerm k -> m (ParamTerm k)
+> unifyTerms t1 t2 = do
+>     env <- getCtxEnv
+>     unifyTerm env t1 t2
+>
+> reifyTerm :: MonadInfer k m => ParamTerm k -> m (ParamTerm k)
+> reifyTerm t = do
+>     env <- getCtxEnv
+>     ctxTerm <$> reify (Context env t) 
+>
 > infer :: MonadInfer k m => ParamTerm k -> m (ParamTerm k)
 > infer (Ref n) = (nth n . ieRefs) <$> ask >>= maybe (throwError (FreeVariable n)) return
 > infer (Fun f) = return $ parameterize $ fFullType f
@@ -93,8 +106,8 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 > infer (App f a) = do
 >     (ta, tb) <- inferP f
 >     targ <- infer a
->     unify (eval ta) (eval targ)
->     reify $ substitute 0 a tb
+>     unifyTerms (eval ta) (eval targ)
+>     reifyTerm $ substitute 0 a tb
 > infer (Let l i) = infer l >>= flip extend (infer i)
 > infer (Prod a b) = extend' a $ \ua -> inferS b >>= \ub -> return $ Sort $
 >     case ub of
@@ -123,20 +136,20 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 >          let expt = foldl App (Constr i ci) $ rcps
 >          let et = substituteMany 0 (expt:inds') tt
 >          at <- substituteMany 0 rcps <$> (extendAll cps $ infer b)
->          unify (eval at) (eval et)
+>          unifyTerms (eval at) (eval et)
 >     let ar = zipWith (\n -> offsetFree 1 . subPs n) [0..] $ parameterizeAll $ iArity i
 >     extendAll (tType: ar) $ inferS tt
 >     zipWithM constr (zip [0..] $ iConstructors i) ts
 >     return $ substituteMany 0 (t:inds) tt
 >
-> type InferE a = UnifyEqT Term (ExceptT TypeError (Reader (InferEnv Void))) a
+> type InferE a = UnifyEqT (Context Void) (ExceptT TypeError (Reader (InferEnv Void))) a
 >
 > runInferE :: [Term] -> InferE a -> Either TypeError a
 > runInferE ts m = runReader (runExceptT $ runUnifyEqT m) (InferEnv ts Map.empty)
 >
-> type InferU k a = UnifyT k (ParamTerm k) (ExceptT TypeError (Reader (InferEnv k))) a
+> type InferU k a = UnifyT k (Context k) (ExceptT TypeError (Reader (InferEnv k))) a
 >
-> runInferU :: (Ord k, Infinite k) => InferEnv k -> InferU k a -> Either TypeError a
+> runInferU :: (Show k, Ord k, Infinite k) => InferEnv k -> InferU k a -> Either TypeError a
 > runInferU ie m = runReader (runExceptT $ runUnifyT m) ie
 >
 > runInfer :: Term -> Either TypeError Term
@@ -179,7 +192,7 @@ Once again, we define a specailized version of `infer` for products:
 >     do
 >         t' <- eval <$> infer t
 >         -- This is a hack to make Void type inference work.
->         intoProduct t' <|> (freshProd >>= unify t' >>= intoProduct)
+>         intoProduct t' <|> (freshProd >>= unifyTerms t' >>= intoProduct)
 >     where freshProd = liftA2 Prod (Param <$> fresh) (Param <$> fresh)
 
 Just as we may want to cast a data type into a product, we may also want to cast

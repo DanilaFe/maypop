@@ -45,7 +45,7 @@ parser (which may or may not be well-formed) into Maypop terms.
 > type ResolveTerm = S.ParamTerm ResolveParam
 >
 > instantiate
->     :: (MonadWriter [(k, S.ParamTerm k)] m,  MonadUnify k (S.ParamTerm k) m)
+>     :: (MonadWriter [(k, S.ParamTerm k)] m,  MonadUnify k (Context k) m)
 >     => ResolveTerm -> m (k, S.ParamTerm k)
 > instantiate rt =
 >     do
@@ -74,7 +74,7 @@ parser (which may or may not be well-formed) into Maypop terms.
 >             let xt = maybe [] (return . (,) x . parameterize . snd) mcd
 >             local (setParams $ Map.fromList $ ts ++ xt) $ do
 >                 infer pt
->                 pt' <- reify pt >>= fillAll rs
+>                 pt' <- reifyTerm pt >>= fillAll rs
 >                 maybe (throwError TypeError) return
 >                     $ strip $ maybe pt' (flip (subst x) pt')
 >                     $ parameterize <$> mt
@@ -90,13 +90,13 @@ parser (which may or may not be well-formed) into Maypop terms.
 >         replace (S.Case t i tt ts) = liftA3 (`S.Case` i) (replace t) (replace tt) (mapM replace ts)
 >         replace t = return t
 >
-> fillAll :: (MonadInfer k m, MonadUnify k (S.ParamTerm k) m) => [Recipe Meta] -> S.ParamTerm k -> m (S.ParamTerm k)
+> fillAll :: (MonadInfer k m, MonadUnify k (Context k) m) => [Recipe Meta] -> S.ParamTerm k -> m (S.ParamTerm k)
 > fillAll rs = replaceParams (fill rs . S.Param)
 >
-> fill :: (MonadInfer k m, MonadUnify k (S.ParamTerm k) m) => [Recipe Meta] -> S.ParamTerm k -> m (S.ParamTerm k)
+> fill :: (MonadInfer k m, MonadUnify k (Context k) m) => [Recipe Meta] -> S.ParamTerm k -> m (S.ParamTerm k)
 > fill rs t = do
->     tt <- eval <$> (infer t >>= reify)
->     ttt <- eval <$> (infer tt >>= reify)
+>     tt <- eval <$> (infer t >>= reifyTerm)
+>     ttt <- eval <$> (infer tt >>= reifyTerm)
 >     env <- asks ieRefs
 >     case (t, strip tt, ttt) of
 >         (S.Param{}, Just tt', S.Sort Constraint)
