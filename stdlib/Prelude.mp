@@ -4,7 +4,7 @@ import Data.Pair (Pair(..), fst, snd, swap, curry, uncurry)
 import Data.Void (Void, absurd)
 import Data.Nat (Nat(..), plus)
 import Data.Bool (Bool(..), and, or)
-import Class.Eq (Eq(..))
+import Class.Eq (Eq(..), eq, eqNat, eqBool)
 import Logic (And(..), Or(..), Not, Eq(..), replace)
 
 list1 : List Nat where
@@ -23,6 +23,6 @@ list4 : List Nat where
 list4 = map Nat Nat (plus (S O)) list3
 end
 
-main : List Nat where
-main = list4
+main : Bool where
+main = eq True False
 end
