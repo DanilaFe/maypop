@@ -28,6 +28,7 @@ parser (which may or may not be well-formed) into Maypop terms.
 > import Data.Bifunctor
 > import Debug.Trace
 > import Data.Foldable
+> import Debug.Trace
 >
 > data ResolveError
 >     = UnknownReference
@@ -70,12 +71,16 @@ parser (which may or may not be well-formed) into Maypop terms.
 >         let e = runInferU (InferEnv env Map.empty) (elab rs cd)
 >         liftEither $ first ElaborateFailed e
 >     where
->         elab :: [Recipe Meta] -> Maybe (ParseDef, S.Term) -> InferU String S.Term
+>         elab :: [Recipe Meta] -> Maybe CurrentDef -> InferU String S.Term
 >         elab rs mcd = runUnifyT $ do
 >             ((x, pt), ts) <- runWriterT $ instantiate rt
->             let xt = maybe [] (return . (,) x . parameterize . snd) mcd
+>             let xt = maybe [] (return . (,) x . parameterize . cdType) mcd
 >             local (setParams $ Map.fromList $ ts ++ xt) $ do
->                 infer pt
+>                 ptt <- infer pt
+>                 case mcd of
+>                     Just (CurrentDef{cdDef=Right{}, cdReturn=rt}) -> do
+>                         void $ unifyTerms (eval ptt) (eval $ parameterize rt)
+>                     _ -> return ()
 >                 pt' <- reifyTerm pt >>= fillAll rs >>=reifyTerm
 >                 maybe (throwError TypeError) return
 >                     $ strip $ maybe pt' (flip (subst x) pt')
@@ -125,10 +130,16 @@ parser (which may or may not be well-formed) into Maypop terms.
 > varParent (SmallerThan s) = Just s
 > varParent _ = Nothing
 >
+> data CurrentDef = CurrentDef
+>     { cdDef :: ParseDef
+>     , cdType :: S.Term
+>     , cdReturn :: S.Term
+>     }
+> 
 > data ResolveEnv = ResolveEnv
 >     { reVars :: [(String, VarSize)]
 >     , reHeader :: ModuleHeader
->     , reCurrentDef :: Maybe (ParseDef, S.Term)
+>     , reCurrentDef :: Maybe CurrentDef
 >     , reApps :: [ParseTerm]
 >     , reEnv :: [S.Term]
 >     }
@@ -145,11 +156,11 @@ parser (which may or may not be well-formed) into Maypop terms.
 > withVars :: MonadReader ResolveEnv m => [String] -> m a -> m a
 > withVars xs m = foldr withVar m xs
 >
-> withFun :: MonadReader ResolveEnv m => ParseFun -> S.Term -> m a -> m a
-> withFun f t = local $ \re -> re { reCurrentDef = Just (Right f, t) }
+> withFun :: MonadReader ResolveEnv m => ParseFun -> S.Term -> S.Term -> m a -> m a
+> withFun f t tt = local $ \re -> re { reCurrentDef = Just (CurrentDef (Right f) t tt) }
 >
 > withInd :: MonadReader ResolveEnv m => ParseInd -> S.Term -> m a -> m a
-> withInd i t = local $ \re -> re { reCurrentDef = Just (Left i, t) }
+> withInd i t = local $ \re -> re { reCurrentDef = Just (CurrentDef (Left i) t (S.Sort (piSort i))) }
 >
 > withApp :: MonadReader ResolveEnv m => ParseTerm -> m a -> m a
 > withApp pt = local $ \re -> re { reApps = pt : reApps re }
@@ -245,7 +256,7 @@ parser (which may or may not be well-formed) into Maypop terms.
 >     do
 >         asks reCurrentDef
 >             >>= maybe (throwError InvalidFixpoint) return
->             >>= either (const $ return ()) record . fst
+>             >>= either (const $ return ()) record . cdDef
 >     where
 >         record cf = do
 >             params <- take (length $ pfArity cf) <$> asks reApps
@@ -339,7 +350,7 @@ parser (which may or may not be well-formed) into Maypop terms.
 > resolveFun f = do
 >     fts <- resolveTerm (pfType f) >>= elaborate Nothing
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
->     rec f' <- withNoDecreasing $ withRefs (map snd ats) $ withSizedVar SelfRef (pfName f) $ withFun f fts $  do
+>     rec f' <- withNoDecreasing $ withRefs (map snd ats) $ withSizedVar SelfRef (pfName f) $ withFun f fts rt $  do
 >          fb <- withSizedVars Original (pfArgNames f) (resolveTerm (pfBody f)) >>= elaborate (Just (S.Fun f'))
 >          md <- findDecreasing (pfArgNames f) 
 >          return $ Function (pfName f) ats rt fb md
