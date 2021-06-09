@@ -26,6 +26,8 @@ parser (which may or may not be well-formed) into Maypop terms.
 > import Data.List
 > import Data.Maybe
 > import Data.Bifunctor
+> import Debug.Trace
+> import Data.Foldable
 >
 > data ResolveError
 >     = UnknownReference
@@ -65,6 +67,7 @@ parser (which may or may not be well-formed) into Maypop terms.
 >         env <- parameterizeAll <$> asks reEnv
 >         cd <- asks reCurrentDef
 >         rs <- intoRecipies <$> gets rsScope
+>         traceM $ "Starting with env " ++ show env
 >         let e = runInferU (InferEnv env Map.empty) (elab rs cd)
 >         liftEither $ first ElaborateFailed e
 >     where
@@ -73,8 +76,18 @@ parser (which may or may not be well-formed) into Maypop terms.
 >             ((x, pt), ts) <- runWriterT $ instantiate rt
 >             let xt = maybe [] (return . (,) x . parameterize . snd) mcd
 >             local (setParams $ Map.fromList $ ts ++ xt) $ do
+>                 traceM "Inference..."
 >                 infer pt
->                 pt' <- reifyTerm pt >>= fillAll rs
+>                 traceM "Inference succeeded at least."
+>                 traceM $ "Term: " ++ pretty pt
+>                 let ps = Data.Foldable.toList pt
+>                 asks ieRefs >>= traceM . ("Env: " ++) . show
+>                 traceM $ "Params: " ++ show ps
+>                 mapM (\p -> (show <$> bound p) >>= traceM) ps
+>                 rt <- reifyTerm pt
+>                 traceM $ "Reified: " ++ show rt
+>                 pt' <- reifyTerm pt >>= fillAll rs >>=reifyTerm
+>                 traceM $ "Done filling. Result: " ++ pretty pt'
 >                 maybe (throwError TypeError) return
 >                     $ strip $ maybe pt' (flip (subst x) pt')
 >                     $ parameterize <$> mt
@@ -90,19 +103,28 @@ parser (which may or may not be well-formed) into Maypop terms.
 >         replace (S.Case t i tt ts) = liftA3 (`S.Case` i) (replace t) (replace tt) (mapM replace ts)
 >         replace t = return t
 >
-> fillAll :: (MonadInfer k m, MonadUnify k (Context k) m) => [Recipe Meta] -> S.ParamTerm k -> m (S.ParamTerm k)
-> fillAll rs = replaceParams (fill rs . S.Param)
+> fillAll :: (Show k, MonadInfer k m, MonadUnify k (Context k) m) => [Recipe Meta] -> S.ParamTerm k -> m (S.ParamTerm k)
+> fillAll = replaceParams . fill
 >
-> fill :: (MonadInfer k m, MonadUnify k (Context k) m) => [Recipe Meta] -> S.ParamTerm k -> m (S.ParamTerm k)
-> fill rs t = do
->     tt <- eval <$> (infer t >>= reifyTerm)
->     ttt <- eval <$> (infer tt >>= reifyTerm)
->     env <- asks ieRefs
->     case (t, strip tt, ttt) of
->         (S.Param{}, Just tt', S.Sort Constraint)
->             | [x] <- findIndices ((==eval tt) . eval) env -> return (S.Ref x)
->             | Right rt <- runSearch rs tt' -> return (parameterize rt)
->         _ -> return t
+> fill :: (Show k, MonadInfer k m, MonadUnify k (Context k) m) => [Recipe Meta] -> k -> m (S.ParamTerm k)
+> fill rs k = do
+>     traceM $ "Filling " ++ show k
+>     mh <- bound k
+>     traceM $ "Binding info: " ++ show mh
+>     case mh of
+>         Just (Context{ctxEnv=env, ctxTerm=Nothing}) -> do
+>             traceM "It's not bound!"
+>             let t = S.Param k
+>             tt <- eval <$> (infer t >>= reifyTerm)
+>             ttt <- eval <$> (infer tt >>= reifyTerm)
+>             env' <- asks ieRefs
+>             traceM $ pretty ttt
+>             case (strip tt, ttt) of
+>                 (Just tt', S.Sort Constraint)
+>                     | [x] <- findIndices ((==eval tt) . eval) env' -> bind k (Context (map Valid env') (Just $ S.Ref x)) >> return t
+>                     | Right rt <- runSearch rs tt' -> return (parameterize rt)
+>                 _ -> return t
+>         Nothing -> traceM "It's bound." >> return (S.Param k)
 > 
 > subst :: Eq k => k -> S.ParamTerm k -> S.ParamTerm k -> S.ParamTerm k
 > subst k rt = runIdentity . replaceParams subst'
@@ -330,10 +352,13 @@ parser (which may or may not be well-formed) into Maypop terms.
 >
 > resolveFun :: MonadResolver m => ParseFun -> m S.Function
 > resolveFun f = do
+>     traceM $ "---- Inside " ++ pfName f ++ " ----"
 >     fts <- resolveTerm (pfType f) >>= elaborate Nothing
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
+>     traceM $ "Function args: " ++ show ats
 >     rec f' <- withNoDecreasing $ withRefs (map snd ats) $ withSizedVar SelfRef (pfName f) $ withFun f fts $  do
 >          fb <- withSizedVars Original (pfArgNames f) (resolveTerm (pfBody f)) >>= elaborate (Just (S.Fun f'))
+>          traceM "??"
 >          md <- findDecreasing (pfArgNames f) 
 >          return $ Function (pfName f) ats rt fb md
 >     emitFun (pfName f) f' 
@@ -360,8 +385,10 @@ parser (which may or may not be well-formed) into Maypop terms.
 >
 > resolveInd :: MonadResolver m => ParseInd -> m S.Inductive
 > resolveInd pi = do
+>     traceM $ "---- Inside " ++ piName pi ++ " ----"
 >     ips <- resolveParams Nothing (piParams pi ++ piArity pi)
 >     let (ps', is') = splitAt (length $ piParams pi) ips
+>     traceM $ "Inductive params: " ++ show ps'
 >     let it = foldr S.Prod (S.Sort $ piSort pi) ips
 >     rec i' <- withRefs ps' $ withSizedVar SelfRef (piName pi) $ withInd pi it $ do
 >          cs <- withVars (map fst $ piParams pi) $ mapM (resolveConstr i') (piConstructors pi)

@@ -96,12 +96,15 @@ typeclass to require read-only access to the local environment \\(\\Gamma\\).
 > reifyTerm :: MonadInfer k m => ParamTerm k -> m (ParamTerm k)
 > reifyTerm t = do
 >     env <- getCtxEnv
->     ctxTerm <$> reify (Context env t) 
+>     (ctxTerm <$> reify (Context env (Just t))) >>= maybe mzero return 
 >
 > infer :: MonadInfer k m => ParamTerm k -> m (ParamTerm k)
 > infer (Ref n) = (nth n . ieRefs) <$> ask >>= maybe (throwError (FreeVariable n)) return
 > infer (Fun f) = return $ parameterize $ fFullType f
-> infer (Param p) = (Map.lookup p . ieParams) <$> ask >>= maybe (throwError TypeError) return
+> infer (Param p) = do
+>     env <- getCtxEnv
+>     bind p (Context env Nothing)
+>     (Map.lookup p . ieParams) <$> ask >>= maybe (throwError TypeError) return
 > infer (Abs t b) = Prod t <$> extend t (infer b)
 > infer (App f a) = do
 >     (ta, tb) <- inferP f

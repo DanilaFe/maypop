@@ -42,6 +42,7 @@ being unified to be `Unifiable`.
 >     bind :: k -> v -> m v
 >     merge :: k -> k -> m ()
 >     reify :: v -> m v
+>     bound :: k -> m (Maybe v)
 
 What is `Unifiable`? It's simple enough; a type is unifiable if, given two values
 of that type, you can perform unification, possibly yielding a single value of that
@@ -115,18 +116,21 @@ For this, we need `WriterT` to propagate `MonadUnify`:
 >     bind k v = lift $ bind k v
 >     merge k1 k2 = lift $ merge k1 k2
 >     reify v = lift $ reify v
+>     bound k = lift $ bound k
 >
 > instance MonadUnify k v m => MonadUnify k v (StateT s m) where
 >     fresh = lift $ fresh
 >     bind k v = lift $ bind k v
 >     merge k1 k2 = lift $ merge k1 k2
 >     reify v = lift $ reify v
+>     bound k = lift $ bound k
 >
 > instance MonadUnify k v m => MonadUnify k v (ReaderT r m) where
 >     fresh = lift $ fresh
 >     bind k v = lift $ bind k v
 >     merge k1 k2 = lift $ merge k1 k2
 >     reify v = lift $ reify v
+>     bound k = lift $ bound k
 
 Finally, we write a couple of functions to actually run computations inside
 `UnifyT`:
@@ -208,6 +212,7 @@ is polymorphic over a generic monad `m`.
 >                 substituteInternal ks v
 >             _ -> syncKeys ks $ mv1 <|> mv2
 >     reify v = (MkUnifyT $ gets bindingList) >>= (`substituteAll` v) 
+>     bound k = MkUnifyT $ gets ((>>= snd) . Map.lookup k . sBound)
 
 Last but not least, we define a data type for the unification state.
 This consists of two things:
@@ -261,6 +266,7 @@ We can define a very boring instance of `MonadUnify` for this data type:
 >     bind k _ = absurd k
 >     merge k1 _ = absurd k1
 >     reify v = return v
+>     bound k = return (absurd k)
 
 We now implement unification for our `Term` type. Two terms only unify if they are built
 using the same constructor; thus, we mostly include those cases in our pattern matching.
@@ -272,11 +278,20 @@ data matches, too.
 >
 > data Context k = Context
 >     { ctxEnv :: [ContextTerm k]
->     , ctxTerm :: ParamTerm k
+>     , ctxTerm :: Maybe (ParamTerm k)
 >     } deriving Show
 >
+> shorten :: Int -> [ContextTerm k] -> [ContextTerm k]
+> shorten i = map (offset (-i)) . drop i
+>
+> matchLength :: [ContextTerm k] -> [ContextTerm k] -> ([ContextTerm k], [ContextTerm k])
+> matchLength ts1 ts2
+>     | length ts1 > length ts2 = (shorten (length ts1 - length ts2) ts1, ts2)
+>     | length ts1 < length ts2 = (ts1, shorten (length ts2 - length ts1) ts2)
+>     | otherwise = (ts1, ts2)
+>
 > commonPrefix :: (Eq k, MonadUnify k (Context k) m) => [ContextTerm k] -> [ContextTerm k] -> m [ContextTerm k]
-> commonPrefix l1 l2 = compare (reverse l1) (reverse l2) []
+> commonPrefix l1 l2 = let (l1', l2') = matchLength l1 l2 in compare (reverse l1') (reverse l2') []
 >     where
 >         compare (Invalid:xs) (Invalid:ys) acc = compare xs ys (Invalid:acc)
 >         compare ((Valid t1):xs) ((Valid t2):ys) acc =
@@ -290,38 +305,53 @@ data matches, too.
 > weaken :: Int -> ParamTerm k -> ParamTerm k
 > weaken = offsetFree
 >
-> matchContext :: (Show k, Eq k, MonadUnify k (Context k) m) => [ContextTerm k] -> Context k -> m (ParamTerm k)
-> matchContext pr c = strengthen (length (ctxEnv c) - length pr) (ctxTerm c)
+> matchContext :: (Show k, Eq k, MonadUnify k (Context k) m) => [ContextTerm k] -> Context k -> m (Maybe (ParamTerm k))
+> matchContext pr c
+>     | Just t <- ctxTerm c = Just <$> (strengthen (length (ctxEnv c) - length pr) t)
+>     | otherwise = return Nothing
+>
+> combine :: Monad m => (a -> a -> m a) -> Maybe a -> Maybe a -> m (Maybe a)
+> combine f (Just a) (Just b) = Just <$> f a b
+> combine _ m@(Just a) _ = return m
+> combine _ _ m@(Just a) = return m
+> combine _ _ _ = return Nothing
 >
 > instance (Show k, Eq k) => Unifiable k (Context k) where
 >     unify c1 c2 = do
 >         prefix <- commonPrefix (ctxEnv c1) (ctxEnv c2)
 >         traceM $ "Prefix: " ++ show prefix
+>         traceM $ "Left uni: " ++ show (pretty <$> ctxTerm c1)
+>         traceM $ "Left uni: " ++ show (pretty <$> ctxTerm c2)
 >         t1 <- matchContext prefix c1
 >         t2 <- matchContext prefix c2
 >         traceM $ "Done matching contexts."
->         t <- unifyTerm prefix t1 t2
+>         t <- combine (unifyTerm prefix) t1 t2
+>         traceM "Done unifying...."
 >         return $ Context prefix t
->     occurs k ctx = any occ (ctxEnv ctx) || occurs k (ctxTerm ctx)
+>     occurs k ctx = any occ (ctxEnv ctx) || maybe False (occurs k) (ctxTerm ctx)
 >         where
 >             occ Invalid = False
 >             occ (Valid t) = occurs k t
 >     substitute k c1 c2 =
 >         do
->             env' <- walk (ctxEnv c2) []
->             term' <- substituteTerm k env' c1 (ctxTerm c2)
+>             env' <- walk (reverse $ ctxEnv c2) []
+>             term' <- traverse (substituteTerm k env' c1) (ctxTerm c2)
 >             return $ Context env' term'
 >         where
 >             subst _ Invalid = return Invalid
 >             subst acc (Valid t) = Valid <$> substituteTerm k acc c1 t
->             walk (x:xs) acc = subst acc x >>= walk xs . (:acc)
+>             walk (x:xs) acc = return x >>= walk xs . (:acc)
 >             walk _ acc = return acc
 >
+> offset :: Int -> ContextTerm k -> ContextTerm k
+> offset i (Valid t) = Valid $ offsetFree i t
+> offset _ Invalid = Invalid
+>
 > valid :: MonadReader [ContextTerm k] m => ParamTerm k -> m a -> m a
-> valid t = local (Valid t:)
+> valid t = local (map (offset 1) . (Valid t:))
 >
 > invalid :: MonadReader [ContextTerm k] m => m a -> m a
-> invalid = local (Invalid:)
+> invalid = local (map (offset 1) . (Invalid:))
 >
 > invalidN :: MonadReader [ContextTerm k] m => Int -> m a -> m a
 > invalidN n m = foldr ($) m $ replicate n invalid
@@ -338,12 +368,18 @@ data matches, too.
 > substituteTerm :: (Eq k, Show k, MonadUnify k (Context k) m) => k -> [ContextTerm k] -> Context k -> ParamTerm k -> m (ParamTerm k)
 > substituteTerm k env ctx t = runReaderT (subst' t) env
 >     where
->         subst' (Param k') | k == k' = do
+>         subst' t'@(Param k') | k == k' = do
 >             env' <- ask
->             guard $ length env' >= length (ctxEnv ctx)
+>             let diff = length (ctxEnv ctx) - length env'
+>             ct <- if diff >= 0
+>                 then traverse (strengthen diff) (ctxTerm ctx)
+>                 else return $ (weaken (-diff)) <$> (ctxTerm ctx)
+>             traceM $ "Substituting " ++ show k ++ " for " ++ show (pretty <$> ctxTerm ctx) ++ " in " ++ pretty t
+>             traceM $ "Substitution environment: " ++ show (reverse env')
+>             traceM $ "Hole's environment:       " ++ show (reverse (ctxEnv ctx))
 >             prefix <- commonPrefix env' (ctxEnv ctx)
->             ct <- matchContext prefix ctx
->             return ct
+>             matchContext prefix ctx
+>             return $ fromMaybe t' ct
 >         subst' (Abs l r) = do
 >             l' <- subst' l
 >             Abs l' <$> (valid l' $ subst' r)
@@ -385,11 +421,10 @@ data matches, too.
 >                 ts <- branches ind1 $ zipWith unify' ts1 ts2
 >                 return $ Case t ind1 tt ts
 >         unify' (Param k1) (Param k2) = do
->             k <- fresh
 >             env <- ask
->             bind k1 (Context env (Param k)) >> merge k1 k2 >> return (Param k1)
->         unify' (Param k1) t = ask >>= bind k1 . (`Context` t) >> return t
->         unify' t (Param k2) = ask >>= bind k2 . (`Context` t) >> return t
+>             bind k1 (Context env Nothing) >> merge k1 k2 >> return (Param k1)
+>         unify' (Param k1) t = ask >>= bind k1 . (`Context` (Just t)) >> return t
+>         unify' t (Param k2) = ask >>= bind k2 . (`Context` (Just t)) >> return t
 >         unify' _ _ = mzero
 >
 > instance Eq k => Unifiable k (ParamTerm k) where
