@@ -24,7 +24,6 @@ used for type inference.
 > import Data.Bifunctor
 > import Data.Void
 > import Data.Foldable
-> import Debug.Trace
 
 We'll define an MTL-style typeclass that encapsulates unification functionality.
 Since
@@ -299,7 +298,7 @@ data matches, too.
 >         compare _ _ acc = return acc
 >
 > strengthen :: (Show k, MonadPlus m) => Int -> ParamTerm k -> m (ParamTerm k)
-> strengthen n t = trace ("Strengthening... " ++ show n ++ " " ++ show t) $ runReaderT (transform op t) 0
+> strengthen n t = runReaderT (transform op t) 0
 >     where op k = ask >>= \x -> if k - x >= n then return $ Ref (k-n) else mzero
 
 > weaken :: Int -> ParamTerm k -> ParamTerm k
@@ -319,14 +318,9 @@ data matches, too.
 > instance (Show k, Eq k) => Unifiable k (Context k) where
 >     unify c1 c2 = do
 >         prefix <- commonPrefix (ctxEnv c1) (ctxEnv c2)
->         traceM $ "Prefix: " ++ show prefix
->         traceM $ "Left uni: " ++ show (pretty <$> ctxTerm c1)
->         traceM $ "Left uni: " ++ show (pretty <$> ctxTerm c2)
 >         t1 <- matchContext prefix c1
 >         t2 <- matchContext prefix c2
->         traceM $ "Done matching contexts."
 >         t <- combine (unifyTerm prefix) t1 t2
->         traceM "Done unifying...."
 >         return $ Context prefix t
 >     occurs k ctx = any occ (ctxEnv ctx) || maybe False (occurs k) (ctxTerm ctx)
 >         where
@@ -374,9 +368,6 @@ data matches, too.
 >             ct <- if diff >= 0
 >                 then traverse (strengthen diff) (ctxTerm ctx)
 >                 else return $ (weaken (-diff)) <$> (ctxTerm ctx)
->             traceM $ "Substituting " ++ show k ++ " for " ++ show (pretty <$> ctxTerm ctx) ++ " in " ++ pretty t
->             traceM $ "Substitution environment: " ++ show (reverse env')
->             traceM $ "Hole's environment:       " ++ show (reverse (ctxEnv ctx))
 >             prefix <- commonPrefix env' (ctxEnv ctx)
 >             matchContext prefix ctx
 >             return $ fromMaybe t' ct
