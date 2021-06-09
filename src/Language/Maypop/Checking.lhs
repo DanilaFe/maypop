@@ -195,6 +195,44 @@ constructor returning its sort (`iSort i`), taking as arguments its
 parameters and indices.
 
 > infer (Ind i) = return $ parameterize $ foldr Prod (Sort $ iSort i) $ iParams i ++ iArity i
+
+Probably the most complicated case is that of a `Case` expression. In the
+code, the upser specifies the expected return type (`tt`), which may
+contain references to the expression being anayzed and any of its
+indices. We have to validate that this is a well-formed type,
+but also that each branch's type matches up with `tt`. First
+things first, we compute the actual type of the _scrutinee_ (the expression
+being analyzed), and ensure that its type is what is expected. We
+then extract the parameters and indices of the scrutinee's type.
+
+The data type's parameters can themselves occur in the types
+of each constructor's parameters. Since we know their values,
+we can substitute them into anywhere they are needed. For this,
+we define a function `subPs`, which, given an offset (the number
+of binders between the parameters and the term where substituion
+is occuring), substitute the parameters in.
+
+We move on to handling constructors. The types of the constructor
+parameters are augmented (via substitution) by the types of
+the data type's parameters, producing `cps`. The same is
+done with the constructor's indices, producing `inds'`.
+When specializing `tt` for each constructor, the return
+type can contain references to the scrutinee, which is now
+known to be a constructor with some parameters. The parameters
+themselves are not known, but nor are their types in the
+type environment when checking `tt`. We thus introduce "dummy",
+negative references (`-1`, `-2`, and so on) to represent these
+parameters. This is done by `rcps`, and our scrutinee expression
+is saved into `expt`. Finally, we instantiate `tt` with the
+index types and the "concrete" scrutinee, and compare
+the inferred type of the branch to the new `tt`.
+
+And that's the constructor code in `constr`. We finally check the
+`tt` in the "general case", by extendign the environment with the
+types of the indices (from `ar`), as well as the type of the scrutinee
+(`tType`). Having validated this type, we actually run `constr` on
+each branch, and return the case expression's final type.
+
 > infer (Case t i tt ts) = do
 >     (i', is) <- inferI t
 >     guardE TypeError $ i == i'
@@ -213,20 +251,42 @@ parameters and indices.
 >     extendAll (tType: ar) $ inferS tt
 >     zipWithM constr (zip [0..] $ iConstructors i) ts
 >     return $ substituteMany 0 (t:inds) tt
->
+
+And that's it! We've made it through the type inference code. There
+are still helper functions remaining for us to implement. For instance,
+this code that we've written is polymorphic over some `MonadInfer m`,
+but when we actually run the code, we want some _particular_ `m`!
+For now, we leave actual unification aside, and use a specialized
+`UnifyEqT` monad transformer that operates on non-parameterized terms.
+In this case, unification is reduced to a trivial equality comparison,
+and we're effectively just perfoming type checking. The entire
+monad transformer stack for `MonadInfer Void` (the inference monad
+for non-parameterized expressions) is as follows:
+
 > type InferE a = UnifyEqT Term (ExceptT TypeError (Reader [Term])) a
->
+
+We can add a function to actually run an instance of this monad,
+potentially failing with a `TypeError`:
+
 > runInferE :: [Term] -> InferE a -> Either TypeError a
 > runInferE ts m = runReader (runExceptT $ runUnifyEqT m) ts
->
-> runInfer :: Term -> Either TypeError Term
-> runInfer = runInfer' []
->
+
+We also write a couple of functions to specifically run
+our `infer`, which is special case of `runInferE`.
+
 > runInfer' :: [Term] -> Term -> Either TypeError Term
 > runInfer' ts = runInferE ts . infer
 
-There are a few utility functions in the above definitions; let's take a look
-at all of them in turn.  First up is `inferS`. We need this function because
+For when we are performing inference in an empty environment,
+we can define yet another specialized function, `runInfer`:
+
+> runInfer :: Term -> Either TypeError Term
+> runInfer = runInfer' []
+
+Our definition of `infer` contains a few utility functions in the; let's take a look
+at all of them in turn. First up is the family of `infer*` functions, which
+not only perform inference, but also constraint the resulting type to be
+_something_, like a product type. First up is `inferS`. We need this function because
 not all terms consitute valid types. For instance, a lambda function is _not_ a
 type, but it is a term. Indeed, computation aside, only the `Sort` constructor corresponds
 to a valid type. However, some constructs in the Calculus of Constructions specifically require types,
@@ -315,12 +375,21 @@ a total order, but we do have a join semilattice.
 > joinS _ (Type i) = Type i
 
 We should also write some code to perform type checking on entire modules.
+For this, we need a way to verify the validity of a function. It is more
+convenient to use the `extendAll` function from inside the monad,
+since it will verify the validity of the environment.
 
 > checkFunction :: MonadInfer Void m => Function -> m Term
 > checkFunction f = do
->     ft <- extendAll (fArity f) $ infer $ fBody f
->     guardE (TypeMismatch (eval ft) (eval (fType f))) $ eval ft == eval (fType f)
+>     ft <- eval <$> (extendAll (fArity f) $ infer $ fBody f)
+>     let rt = eval (fType f)
+>     guardE (TypeMismatch ft rt) $ ft == rt
 >     return ft
->
+
+Finally, we check an entire module by extracting all the function
+definitions, and running `checkFunction` on each of them in turn.
+
 > checkModule :: Module -> Either TypeError ()
-> checkModule m = runInferE [] $ mapM_ checkFunction $ catMaybes $ map (asFunction . dContent) $ Map.elems $ mDefinitions m
+> checkModule m = runInferE []
+>     $ mapM_ checkFunction $ catMaybes
+>     $ map (asFunction . dContent) $ Map.elems $ mDefinitions m
