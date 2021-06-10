@@ -6,7 +6,14 @@ __In addition, it's written using Literate Haskell, and its source code
 thus contains a quasi-tutorial on how Maypop works. [Check it out!](https://web.engr.oregonstate.edu/~fedorind/CS583/).__
 
 The goal isn't necessarily to make something to replace Coq or Agda, but
-to make a language of that sort that is small enough to understand!
+to make a language of that sort whose codebase is small enough to understand!
+
+The [`unification-fix`](tree/unification-fix) branch contains work-in-progress
+type inference and unification code. The quality of the code is currently
+not up to `main` branch standards, but a lot of things work! Check out
+the `stdlib/Prelude.mp` file on that branch for an example of a call
+to a typeclass-requiring function, and `stdlib/Class/Eq.mp` for a definition
+of that typeclass.
 
 Unless something in the pipeline is going wrong, the above link should
 be up-to-date with the current commit on this repository.
@@ -33,11 +40,15 @@ definition of addition, and needs to be proved by induction.
 * `(1 + n) + m = n + (1 + m)`, which is a lemma used for the proof of...
 * `n + m = m + n`, also known as commutativity of addition!
 
-What still needs to be done:
+On the [`unification-fix`](tree/unification-fix) branch, the following
+things work in addition to the above:
 
 * Type inference (save users the effort of writing types)
+* Type classes (__and automatic search for them__)
+
+What still needs to be done:
+
 * Tactics to make writing proofs easier
-* Type classes (and automatic search for them)
 
 ## Design Decisions
 
