@@ -84,7 +84,7 @@ are exceptionally mechanical; all we do is lift the underlying monad's implement
 > instance MonadModule m => MonadModule (ExceptT e m) where
 >     moduleHeader s = lift $ moduleHeader s 
 >     moduleContent s = lift $ moduleContent s
-
+>
 > instance MonadModule m => MonadModule (PathT m) where
 >     moduleHeader s = lift $ moduleHeader s 
 >     moduleContent s = lift $ moduleContent s
