@@ -132,7 +132,7 @@ factorial n =
 ```
 
 Notice that this is not a term in itself; the above five lines don't
-quite evaluate to anyting. They do, however, tell the interpreter 
+quite evaluate to anything. They do, however, tell the interpreter 
 about a function `factorial`, and its body. They also provide
 a tiny amount of extra information: the expected return type of the function.
 In an explicitly typed lambda calculus, this information is not provided

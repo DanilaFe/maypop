@@ -12,7 +12,7 @@ through our code using a narrative, instead of just throwing a completed reposit
 With that out of the way, feel free to look around the available modules!
 
 If you want some guided reading, we suggest going first to [`Syntax`]({{< ref "modules/syntax.md" >}}),
-then to [`Evaluation`]({{< ref "modules/eval.md" >}}), then to [`Checking`]({{< ref "modules/checking.md" >}}).
+then to [`Eval`]({{< ref "modules/eval.md" >}}), then to [`Checking`]({{< ref "modules/checking.md" >}}).
 There are also examples of code in Maypop in [`Examples`]({{< ref "modules/examples.md" >}}), and some code
 to test the type checker in [`Spec`]({{< ref "modules/spec.md" >}}). If you still have energy by
 then, check out [`Modules`]({{< ref "modules/modules.md" >}}) for our module data structures,
