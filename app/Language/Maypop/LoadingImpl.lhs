@@ -47,7 +47,7 @@ transformers we are using for loading.
 
 > instance MonadModulePath m => MonadModulePath (ReaderT r m) where
 >     modulePaths s = lift $ modulePaths s
-
+>
 > instance MonadModulePath m => MonadModulePath (ExceptT e m) where
 >     modulePaths s = lift $ modulePaths s
 
@@ -57,18 +57,18 @@ define an instance of `MonadModule` for `IO`, that naively looks up and parses a
 Since we don't keep any kind of context between calls to `moduleHeader` and `moduleContent`,
 we'll simply parse the file anew each time.
 
-> parseH :: String -> String -> Either LoadingError (ModuleHeader, String)
-> parseH m s = first (ParseError) $ parseHeader m s
->
-> parseH' :: String -> String -> Either LoadingError ModuleHeader
-> parseH' m s = fst <$> parseH m s
+> parseH :: String -> String -> Either LoadingError ModuleHeader
+> parseH m s = fmap fst $ first (ParseError) $ parseHeader m s
 >
 > parseD :: String -> String -> Either LoadingError [(String, ParseDef)]
 > parseD m s = first (ParseError) $ parseDefs m s
 
+Given these two functions, we can try to perform `IO`, catching exceptions
+and replacing them with a `NoSuchFile` error.
+
 > instance MonadModule IO where
 >     moduleHeader s = handle (\(_ :: IOException) -> return $ Left NoSuchFile)
->         $ fmap ((,) s) <$> parseH' s <$> readFile s
+>         $ fmap ((,) s) <$> parseH s <$> readFile s
 >     moduleContent s = handle (\(_ :: IOException) -> return $ Left NoSuchFile)
 >         $ parseD s <$> readFile s
 
@@ -98,11 +98,11 @@ to the `Data/Nat.mp` file.
 > symbolFilePath :: Symbol -> String
 > symbolFilePath = (++ ".mp") . intercalate "/" . reverse . symbolPath
 
-Finally, let's use all of the above machinery to actually perform IO and
-load some modules!
+We're finally ready to try loading some modules! The "default" load strategy
+will be to search the `stdlib` folder for various files, and nowhere else.
 
 > defaultLoadModule :: Symbol -> IO (Either LoadingError Module)
 > defaultLoadModule s = runPathT (runReaderT (runExceptT (loadModule s)) []) ["./stdlib"]
-
+>
 > defaultLoadFile :: String -> IO (Either LoadingError Module)
 > defaultLoadFile s = runPathT (runReaderT (runExceptT (loadFile s)) []) ["./stdlib"]
