@@ -25,8 +25,6 @@ includes includes the module's name and its imports) and loading its definitions
 this functionality into an interface will also allow us to mock module loading.
 Here is the type class:
 
-{{< todo >}}This is a little awkward. Maybe we need to think a bit more about what <code>MonadModule</code> should provide? {{< /todo >}}
-
 > class Monad m => MonadModule m where
 >     moduleHeader :: String -> m (Either LoadingError (String, ModuleHeader))
 >     moduleContent :: String -> m (Either LoadingError [(String, ParseDef)])

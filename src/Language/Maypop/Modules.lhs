@@ -256,10 +256,6 @@ These errors are actually why we shouldn't define a `Monoid` instance for `Globa
 the type `a -> a -> a` is not amenable to reporting error messages. Intead, we define
 our own function:
 
-{{< todo >}}Maybe we don't need the combineQualified case here. It's really
-redundant if we externally require that duplicate module names are impossible.
-{{< /todo >}}
-
 > mergeScopes :: GlobalScope -> GlobalScope -> Either ImportError GlobalScope
 > mergeScopes gs1 gs2 = flip GlobalScope unqualified <$> qualified
 >     where
