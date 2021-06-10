@@ -17,7 +17,7 @@ a function before they are evaluated.
 
 Our calculus of constructions is expanded with data types and global
 function definitions (which are imported from modules),
-which means that we have the following types of reduction
+which means that we have the following types of reduction:
 
 * __\\(\\beta\\)-reduction__: the classic type of reduction, which consists
 of the substitution of an argument into a lambda abstraction's body.
@@ -34,7 +34,7 @@ allows case expressions to "unpack" instances of constructed terms and
 use their contents.
 
 > eval :: ParamTerm a -> ParamTerm a
-> eval (Fun f) = eval $ expandFunction f
+> eval (Fun f) = eval $ expandFunction f -- Delta reduction
 > eval (Abs l r) = Abs (eval l) (eval r)
 > eval t@App{} = evalApps $ evalLeftmost t
 > eval (Let l r) = do
@@ -61,7 +61,7 @@ the situation with applications is a little complicated. Of course, there's
 the "basic" case of \\(\\beta\\)-reduction: if the left term evaluates to
 a lambda abstraction, we substitute the right term in. But \\(\\iota\\)-reduction
 can also be applied here; fixpoint definition are __not subject to \\(\\delta\\)-reduction__
-(because we can cause infinite substitutions this way), and are only expanded when
+(because we can end up performing infinite substitutions this way), and are only expanded when
 their decreasing argument evaluates to a constructor (and its parameters). But
 the decreasing parameter of a fixpoint function can be its 10th, 20th, or even 100th parameter!
 We must therefore collect all application arguments (right terms) we encounter, and inspect
@@ -103,27 +103,49 @@ In all other cases (non-abstraction, fixpoint with too
 few arguments, fixpoint with non-constructor argument) we simply rebuild
 the chain of applications, but this time evaluating the arguments.
 
-{{< todo >}}We probably want to re-try evalLeftmost here, since the lambda's body can contain a partially applied fixpoint function whose decreasing argument is within ts{{< /todo >}}
-
 > evalApps :: (ParamTerm a, [ParamTerm a]) -> ParamTerm a
-> evalApps (Abs _ b, t:ts) = evalApps (eval $ substitute 0 t b, ts) -- Beta reduction
+> evalApps (Abs _ b, t:ts) = evalApps' (eval $ substitute 0 t b, ts) -- Beta reduction
 > evalApps (Fix f, ts)
 >     | Just t <- nth (fxDecArg f) ts
 >     , Just t' <- fmap rebuildConstrApps $ collectConstrApps $ eval t =
->         evalApps $ (expandFunction (fxFun f), replaceNth (fxDecArg f) t' ts) -- Iota reduction (fixpoint)
+>         evalApps' $ (expandFunction (fxFun f), replaceNth (fxDecArg f) t' ts) -- Iota reduction (fixpoint)
 > evalApps (t, ts) = foldl App t (map eval ts)
->
+
+There's a subtle trick in the above function. Once we perform \\(\\beta\\)- or
+\\(\\iota\\)-reduction, the resulting term need not itself be another
+abstraction of fixpoint; we have to evaluate it, too. Evaluting this
+term can produce more parameters, which we merge with the already-known
+parameters. Once we've computed the new list of parameters, we can
+actually continue our evaluation by calling `evalApps`. We call 
+this process `evalApps'` (an admittedly uninformative name).
+
+> evalApps' :: (ParamTerm a, [ParamTerm a]) -> ParamTerm a
+> evalApps' (t, ts) = let (t', ts') = evalLeftmost t in evalApps (t', ts' ++ ts)
+
+We used a couple of helper functions in the above. The first of these
+was used to replace the decreasing parameter of a fixpoint application
+with its evaluated value. This is kind of like an assignment version
+of the `(!!)` operator.
+
 > replaceNth :: Int -> a -> [a] -> [a]
 > replaceNth _ _ [] = []
 > replaceNth 0 x' (_:xs) = x' : xs
 > replaceNth n x' (x:xs) = x : replaceNth (n-1) x' xs
-> 
+
+The `collectConstrApps` function is used to "cast" a term into a constructor
+application. If it succeeds on a fixpoint's decreasing argument, we know
+that \\(\\iota\\)-reduction is applicable, because that argument is a
+constructor.
+
 > collectConstrApps :: ParamTerm a -> Maybe ((Inductive, Int), [ParamTerm a])
 > collectConstrApps t = second reverse <$> collect t
 >     where
 >         collect (App l r) = second (r:) <$> collect l
 >         collect (Constr i ci) = Just ((i, ci), [])
 >         collect _ = Nothing
->
+
+The `rebuildConstrApps` is effectively the opposite of `collectConstrApps`,
+and rebuilds a constructor application into the term that produced it.
+
 > rebuildConstrApps :: ((Inductive, Int), [ParamTerm a]) -> ParamTerm a
 > rebuildConstrApps ((i, ci), ts) = foldl App (Constr i ci) ts
