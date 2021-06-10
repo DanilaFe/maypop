@@ -1,7 +1,5 @@
 Let's work on type inference a little.
 
-{{< todo >}}Seems like it would make sense to describe each case of Infer here.{{< /todo >}}
-
 > {-# LANGUAGE FlexibleContexts #-}
 > {-# LANGUAGE FlexibleInstances #-}
 > {-# LANGUAGE UndecidableInstances #-}
