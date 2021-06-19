@@ -15,3 +15,9 @@ map t1 t2 f l =
     match l as _ in List _ return List t2 with
         Nil -> Nil t2
         Cons x xs -> Cons t2 (f x) (map t1 t2 f xs)
+
+foldr : forall (A B : Type 0). (A -> B -> B) -> B -> List A -> B
+foldr t1 t2 f b l =
+    match l as _ in List _ return t2 with
+        Nil -> b
+        Cons x xs -> f x (foldr t1 t2 f b xs)

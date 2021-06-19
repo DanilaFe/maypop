@@ -99,7 +99,6 @@ repetitive.
 > kw = reserved genParser
 > op = reservedOp genParser
 > paren = parens genParser
-> nat = fromInteger <$> natural genParser
 >
 > upperIdent :: Parser String
 > upperIdent = try $ do
@@ -167,7 +166,7 @@ repetitive.
 > prop = kw "Prop" >> return Prop
 >
 > type_ :: Parser Sort
-> type_ = pure Type <* kw "Type" <*> nat
+> type_ = pure Type <* kw "Type" <*> (fromInteger <$> natural genParser)
 >
 > qualRef :: Parser ParseRef
 > qualRef = SymRef <$> qlName
@@ -195,8 +194,20 @@ repetitive.
 >     <* kw "return" <*> term
 >     <* kw "with" <*> blk caseBranch
 >
+> nat :: Parser ParseTerm
+> nat = (foldr App (natRef "O") . (`replicate` (natRef "S")) . fromInteger) <$> natural genParser
+>     where natRef s = Ref (SymRef (MkSymbol [s, "Nat", "Data"]))
+>
+> list :: Parser ParseTerm
+> list = do
+>     (ts, t) <- brackets genParser $ (,) <$> commaSep genParser term <* sym ":" <*> term
+>     let listRef s = Ref (SymRef (MkSymbol [s, "List", "Data"]))
+>     let cons = App (listRef "Cons") t
+>     let nil = App (listRef "Nil") t
+>     return $ foldr (\x xs -> App (App cons x) xs) nil ts
+> 
 > term' :: Parser ParseTerm
-> term' = indented >> (sort <|> prodT <|> abs <|> let_ <|> (Ref <$> ref) <|> case_ <|> paren term)
+> term' = indented >> (sort <|> prodT <|> abs <|> let_ <|> (Ref <$> ref) <|> case_ <|> nat <|> list <|> paren term)
 >     where
 >         sort = Sort <$> (prop <|> type_)
 >         gen k f = pure (flip (foldr f)) <* k <*> param <* dot genParser <*> term
