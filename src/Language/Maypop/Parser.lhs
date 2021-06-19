@@ -20,6 +20,7 @@ repetitive.
 > import Text.Parsec
 > import Text.Parsec.Token
 > import Text.Parsec.Expr
+> import Text.Parsec.Indent
 > import qualified Data.Map as Map
 > import qualified Data.Set as Set
 > import Data.Char
@@ -72,12 +73,12 @@ repetitive.
 >
 > type ParseIndRef = (ParseRef, [String])
 >
-> type Parser a = Parsec String () a
+> type Parser a = IndentParser String () a
 >
 > opBegin :: Parser Char
 > opBegin = oneOf " -"
 > 
-> genParser :: GenTokenParser String () Identity
+> genParser :: GenTokenParser String () (IndentT Identity)
 > genParser = makeTokenParser $ LanguageDef
 >     { commentStart = "{-"
 >     , commentEnd = "-}"
@@ -92,6 +93,7 @@ repetitive.
 >     , caseSensitive = True
 >     }
 >
+> blk a = (indented >> block a) <|> return []
 > ident = identifier genParser
 > sym = symbol genParser
 > kw = reserved genParser
@@ -180,7 +182,7 @@ repetitive.
 > arrow = void $ sym "->"
 >
 > caseBranch :: Parser ParseBranch
-> caseBranch = pure (,,) <* sym "|" <*> upperIdent <*> many ident <* arrow <*> term
+> caseBranch = withPos $ pure (,,) <*> upperIdent <*> many ident <* arrow <*> term
 >
 > inductiveRef :: Parser ParseIndRef
 > inductiveRef = pure (,) <*> ref <* sym "_" <*> many ident
@@ -191,11 +193,10 @@ repetitive.
 >     <* kw "as" <*> ident
 >     <* kw "in" <*> inductiveRef
 >     <* kw "return" <*> term
->     <* kw "with" <*> many caseBranch
->     <* kw "end"
+>     <* kw "with" <*> blk caseBranch
 >
 > term' :: Parser ParseTerm
-> term' = sort <|> prodT <|> abs <|> let_ <|> (Ref <$> ref) <|> case_ <|> paren term
+> term' = indented >> (sort <|> prodT <|> abs <|> let_ <|> (Ref <$> ref) <|> case_ <|> paren term)
 >     where
 >         sort = Sort <$> (prop <|> type_)
 >         gen k f = pure (flip (foldr f)) <* k <*> param <* dot genParser <*> term
@@ -203,7 +204,7 @@ repetitive.
 >         abs = gen lambda Abs
 >         let_ = pure (curry Let) <* kw "let" <*> ident <* sym "=" <*> term <* kw "in" <*> term
 >
-> opTable :: OperatorTable String () Identity ParseTerm
+> opTable :: OperatorTable String () (IndentT Identity) ParseTerm
 > opTable =
 >     [ [ Infix (do { safeWhite >> pure App }) AssocLeft ]
 >     , [ Infix (do { arrow >> whiteSpace genParser >> pure (Prod . ("_",)) }) AssocRight ]
@@ -221,8 +222,8 @@ repetitive.
 > collectArity _ = fail "Invalid arity declaration!"
 >
 > indBranch :: String -> Parser ParseConstr
-> indBranch i = pure ParseConstr
->     <* sym "|" <*> ident <*> params
+> indBranch i = withPos $ pure ParseConstr
+>     <*> ident <*> params
 >     <* sym ":" <* sym i <*> many term'
 >
 > inductive :: Parser (String, ParseInd)
@@ -233,8 +234,7 @@ repetitive.
 >     sym ":"
 >     (ar, s) <- term >>= collectArity
 >     kw "where"
->     cs <- many (indBranch name)
->     kw "end"
+>     cs <- blk (indBranch name)
 >     return $ (name, ParseInd name ps ar s cs)
 >
 > function :: Parser (String, ParseFun)
@@ -242,22 +242,20 @@ repetitive.
 >    name <- ident
 >    sym ":"
 >    t <- term
->    kw "where"
 >    sym name
 >    ps <- many ident
 >    sym "="
 >    bt <- term
->    kw "end"
 >    return $ (name, ParseFun name ps t bt)
 >
 > definition :: Parser (String, ParseDef)
 > definition = (second Left <$> inductive) <|> (second Right <$> function)
 >
 > parseHeader :: String -> String -> Either ParseError (ModuleHeader, String)
-> parseHeader = runP (liftA2 (,) header (many anyToken)) ()
+> parseHeader fn s = runIdentity $ runIndentParserT (liftA2 (,) header (many anyToken)) () fn s
 >
 > parseDefs :: String -> String -> Either ParseError [(String, ParseDef)]
-> parseDefs = runP (header *> many definition <* eof) ()
+> parseDefs fn s = runIdentity $ runIndentParserT (header *> many definition <* eof) () fn s
 >
 > data ResolveError
 >     = UnknownReference
@@ -449,7 +447,7 @@ repetitive.
 > resolveTerm (Let (x, t) ti) = liftA2 S.Let (clearApps $ resolveTerm t) (withVar x $ resolveTerm ti)
 > resolveTerm (Prod (x, tt) t) = clearApps $ liftA2 S.Prod (resolveTerm tt) (withVar x $ resolveTerm t)
 > resolveTerm (Sort s) = return $ S.Sort s
-> resolveTerm (Case t x ir tt bs) = do
+> resolveTerm e@(Case t x ir tt bs) = do
 >     t' <- clearApps $ resolveTerm t
 >     vs <- caseTermSize t
 >     (i, is) <- resolveIndRef ir
