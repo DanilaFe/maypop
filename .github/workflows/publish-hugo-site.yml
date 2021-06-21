@@ -26,7 +26,7 @@ jobs:
               run: ./script/pages.sh
 
             - name: Build
-              run: hugo
+              run: hugo -D
 
             - name: Upload 
               uses: wlixcc/SFTP-Deploy-Action@v1.0
