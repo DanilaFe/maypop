@@ -441,24 +441,8 @@ our list of names:
 > names :: Names
 > names = infList
 
-Now we have all the machinery in place for wrangling our infinite
-list of varaible names. We'll be using a State monad to keep track
-of which names we have and haven't used. We can thus write a convenient
-operation to generate a fresh name in such a context. This operation
-generates a new name (by peeking at the infinite list of names via `headInf`)
-and then removes it from the list (by setting the name list to its tail via `tailInf`).
-
-> popName :: MonadState Names m => m String
-> popName = gets headInf <* modify tailInf
-
-In case we need multiple names, we can define `popNames` as follows:
-
-> popNames :: MonadState Names m => Int -> m [String]
-> popNames i = sequence $ replicate i popName
-
-We now have ways to generate fresh names; what remains is a way to
-make these names available to our pretty printer. While the `State`
-monad will be used to generate more and more fresh variable, a `Reader`
+In our implementation, an `Inf`
+monad will be used to generate more and more fresh variable, and a `Reader`
 monad will be used to represent the names corresponding to each DeBrujin
 index. This is simple enough to represent as a stack of names:
 the top name on the stack corresponds to DeBrujin index 0, the
@@ -481,12 +465,12 @@ and 2 for \\(a\\).
 And now, the pretty printer itself.
 
 > pretty :: (Show a, Eq a) => ParamTerm a -> String
-> pretty t = fst $ runState (runReaderT (prettyM 0 t) []) names
+> pretty t = runInf (runReaderT (prettyM 0 t) []) names
 >     where
 >         collectProd (Prod l r) | occurs 0 r = first (l:) $ collectProd r
 >         collectProd e = ([], e)
 >         prettyMGroup xs rm = do
->             names <- replicateM (length xs) popName
+>             names <- popN (length xs)
 >             st <- maybe (return "??") (prettyM 0) (nth 0 xs)
 >             sr <- extendNames names rm
 >             return $ "∀(" ++ intercalate " " names ++ " : " ++ st ++ ")." ++ sr
@@ -496,7 +480,7 @@ And now, the pretty printer itself.
 >         prettyM _ (Fix f) = return $ fName $ fxFun f
 >         prettyM _ (Param p) = return $ show p
 >         prettyM n (Abs t1 t2) = paren (n >= 10) <$> do
->             newName <- popName
+>             newName <- pop
 >             st1 <- prettyM 0 t1
 >             st2 <- extendNames [newName] $ prettyM 0 t2
 >             return $ "λ(" ++ newName ++ ":" ++ st1 ++ ")." ++ st2
@@ -515,7 +499,7 @@ And now, the pretty printer itself.
 >                  st2 <- extendNames ["_"] $ prettyM 9 t2
 >                  return $ st1 ++ " → " ++ st2
 >         prettyM n (Let t1 t2) = paren (n >= 10) <$> do
->             newName <- popName
+>             newName <- pop
 >             st1 <- prettyM 0 t1
 >             st2 <- extendNames [newName] $ prettyM 0 t2
 >             return $ "let " ++ newName ++ " = " ++ st1 ++ " in " ++ st2
@@ -524,13 +508,13 @@ And now, the pretty printer itself.
 >         prettyM _ (Ind i) = return $ iName i
 >         prettyM n (Case t i tt ts) = paren (n >= 10) <$> do
 >             st <- prettyM 0 t
->             termName <- popName
->             indexNames <- popNames (length $ iArity i)
+>             termName <- pop
+>             indexNames <- popN (length $ iArity i)
 >             stt <- extendNames (termName:indexNames) (prettyM 0 tt)
 >             sts <- zipWithM constr (iConstructors i) ts
 >             return $ "match " ++ st ++ " as " ++ termName ++ " in " ++ (intercalate " " $ iName i : indexNames) ++ " return " ++ stt ++ " with { " ++ intercalate "; " sts ++ " }"
 >         constr c t = do
->             paramNames <- popNames (length $ cParams c)
+>             paramNames <- popN (length $ cParams c)
 >             st <- extendNames paramNames (prettyM 0 t)
 >             return $ intercalate " " (cName c : paramNames) ++ " -> " ++ st
 

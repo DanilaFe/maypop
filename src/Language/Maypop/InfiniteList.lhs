@@ -6,7 +6,15 @@ we need an infinite supply of fresh unifiction variables.
 
 > {-# LANGUAGE DeriveFunctor #-}
 > {-# LANGUAGE FlexibleInstances #-}
+> {-# LANGUAGE MultiParamTypeClasses #-}
+> {-# LANGUAGE FunctionalDependencies #-}
+> {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+> {-# LANGUAGE UndecidableInstances #-}
 > module Language.Maypop.InfiniteList where
+> import Control.Monad.State
+> import Control.Monad.Identity
+> import Control.Monad.Reader
+> import Control.Monad.Except
 
 The definition of an `InfList` is extremely simple. It's just a list
 without a base case! Thanks to Haskell's lazy evaluation, this
@@ -55,3 +63,59 @@ Let's write this down:
 > instance Infinite [Char] where
 >     infList = fromList alphabet $ expand ((<$>alphabet) . (++)) infList
 >         where alphabet = map return ['a'..'z']
+
+The main use of an infinite list is to pull items from it for other uses.
+In a sense, this is a stateful operation: we obviously can't modify
+an `InfList` object, so we have to keep track of its last version. To pull
+a new element, we look at the current version's head, and update the current
+version to refer to the tail. In the style of the MTL, we define a typeclass
+that encapsulates this functionality:
+
+> class Monad m => MonadInf k m | m -> k where
+>     pop :: m k
+>
+>     popN :: Int -> m [k]
+>     popN = (`replicateM` pop)
+
+Also in the style of the MTL, we define a monad trasnformer that is an instance
+of our new type class. Let's call it `InfT`. This monad transformer is simply
+a `newtype` over a `StateT` monad; we do not, however, make `InfT` an instance
+of `MonadState`, to allow other library code to combine `InfT` with its own
+state as needed.
+
+> newtype InfT k m a = MkInfT { unwrapInfT :: StateT (InfList k) m a }
+>     deriving (Functor, Applicative, Monad, MonadTrans)
+
+The implementation of the `pop` operation is pretty the same as what we
+described above.
+
+> instance Monad m => MonadInf k (InfT k m) where
+>     pop = MkInfT $ gets headInf <* modify tailInf
+
+Frustratingly, we also need to mechanically implement a handful of `MonadInf`
+instances for some common built-in trasnformers.
+
+> instance MonadInf k m => MonadInf k (ReaderT r m) where
+>     pop = lift pop
+>
+> instance MonadInf k m => MonadInf k (StateT s m) where
+>     pop = lift pop
+>
+> instance MonadInf k m => MonadInf k (ExceptT e m) where
+>     pop = lift pop
+
+As usual, we need a way to run the computation represented by `InfT`, returning
+a computation in the underlying monad `m`. Since `InfT` is effectively an alias
+for `StateT`, our new function merely invokes `runStateT`, and cleans up
+by throwing away the unused remainder of the infinite list.
+
+> runInfT :: Monad m => InfT k m a -> InfList k -> m a
+> runInfT m ks = fst <$> runStateT (unwrapInfT m) ks
+
+For the trivial case in which there _is_ no underlying computation, we define
+a type alias `Inf`, and a corresponding `runInf` function:
+
+> type Inf k a = InfT k Identity a
+>
+> runInf :: Inf k a -> InfList k -> a
+> runInf m ks = runIdentity $ runInfT m ks
