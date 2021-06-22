@@ -187,7 +187,7 @@ Well, here's one example when we might. Consider the function:
 The use of \\(\\text{Maybe}\\) is required here because we may well give the
 function a natural number that's larger than the length of the list. We
 can't return a corresponding element, and thus, we'd have to resort to
-\\(\\text{Nothing}\\). However, what if we wanted write an expression like:
+\\(\\text{Nothing}\\). However, what if we wanted to write an expression like:
 
 {{< latex >}}
 \text{nthElem}\ [\mathbb{N}]\ 0\ [1,2,3]
@@ -254,7 +254,7 @@ our abtraction case contains only \\(\\alpha\\), and not
 something in the form \\(x : \\tau'\\). However, why don't we take
 a hint from our earlier extension of \\(\\Gamma\\)?
 If we squint at it a little, \\(\\alpha\\ \\text{type}\\) starts to look like \\(\\alpha : \\text{Type}\\).
-We could make this work, if we were to extend our type grammr with another object, \\(\\text{Type}\\),
+We could make this work, if we were to extend our type grammar with another object, \\(\\text{Type}\\),
 which is the type of types (also known as a kind).
 In this case, we'd be able to write \\(\\forall \\alpha. \\tau\\) as \\(\\Pi \\alpha:\\text{Type}. \\tau\\).
 Our rule for \\(\\Lambda\\)-abstractions then starts to look like:
