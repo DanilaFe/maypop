@@ -441,8 +441,9 @@ our list of names:
 > names :: Names
 > names = infList
 
-In our implementation, an `Inf`
-monad will be used to generate more and more fresh variable, and a `Reader`
+In our implementation, an `Inf` monad (which gives us the function `pop`
+that retrieves a value from an infinite list)
+will be used to generate more and more fresh variable, and a `Reader`
 monad will be used to represent the names corresponding to each DeBrujin
 index. This is simple enough to represent as a stack of names:
 the top name on the stack corresponds to DeBrujin index 0, the
