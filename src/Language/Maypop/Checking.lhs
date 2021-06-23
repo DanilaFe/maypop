@@ -295,6 +295,11 @@ our `infer`, which is special case of `runInferE`.
 > runInfer :: Term -> Either TypeError Term
 > runInfer = runInferE . infer
 
+> type InferU k a = UnifyT k (Context String k) (ExceptT TypeError (InfT String (Reader [(String, ParamTerm k)]))) a
+>
+> runInferU :: (Eq k, Infinite k) => InferU k a -> Either TypeError a
+> runInferU m = runReader (runInfT (runExceptT $ runUnifyT m)) []
+
 Our definition of `infer` contains a few utility functions in the; let's take a look
 at all of them in turn. First up is the family of `infer*` functions, which
 not only perform inference, but also constraint the resulting type to be
