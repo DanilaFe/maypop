@@ -70,8 +70,16 @@ can define a trivial type class instance, `MonadInfer k`, which implies
 all of the other common constraints. The `k` in this definition is the type
 of parameters that our terms are parameterized by.
 
-> class (MonadReader [(String, ParamTerm k)] m, MonadError TypeError m, MonadUnify k (ParamTerm k) m, MonadInf String m) => MonadInfer k m where
-> instance (MonadReader [(String, ParamTerm k)] m, MonadError TypeError m, MonadUnify k (ParamTerm k) m, MonadInf String m) => MonadInfer k m where
+> class (Eq k, MonadReader [(String, ParamTerm k)] m, MonadError TypeError m, MonadUnify k (Context String k) m, MonadInf String m) => MonadInfer k m where
+> instance (Eq k, MonadReader [(String, ParamTerm k)] m, MonadError TypeError m, MonadUnify k (Context String k) m, MonadInf String m) => MonadInfer k m where
+
+> unifyTerms :: MonadInfer k m => ParamTerm k -> ParamTerm k -> m (ParamTerm k)
+> unifyTerms t1 t2 = do { bs <- asks (map fst); unifyInContext bs t1 t2 }
+
+> reifyTerm :: MonadInfer k m => ParamTerm k -> m (ParamTerm k)
+> reifyTerm t = do 
+>     bs <- asks (map fst)
+>     ctxValue <$> reify (Context bs Nothing (Just t)) >>= maybe mzero return
 
 Finally, on to the type inference function. We use the `MonadReader`
 typeclass to require read-only access to the local environment \\(\\Gamma\\).
@@ -98,7 +106,15 @@ The case for parameters must be present, but I'm not currently
 sure what the best way of handling it is. For now, it remains
 unimplemented.
 
-> infer (Param p) = undefined -- TODO
+> infer (Param p) = do
+>     bs <- asks (map fst)
+>     ctx <- bind p (Context bs Nothing Nothing)
+>     case ctxType ctx of
+>         Just t -> return t
+>         Nothing -> do
+>             t <- Param <$> fresh
+>             bind p (Context bs (Just t) Nothing)
+>             return t
 
 The type of a lambda abstraction is a product type;
 the first component of `Abs` is the input type,
@@ -124,8 +140,8 @@ it this value.
 > infer (App f a) = do
 >     (ta, tb) <- inferP f
 >     targ <- infer a
->     unify (eval ta) (eval targ)
->     reify $ substitute 0 a tb
+>     unifyTerms (eval ta) (eval targ)
+>     reifyTerm $ substitute 0 a tb
 
 A let expression is not explicitly decorated with types; we thus
 infer the type of newly introduced variable (in the `let` portion)
@@ -248,7 +264,7 @@ each branch, and return the case expression's final type.
 >          let expt = foldl App (Constr i ci) $ rcps
 >          let et = substituteMany 0 (expt:inds') tt
 >          at <- substituteMany 0 rcps <$> (extendAll cps $ infer b)
->          unify (eval at) (eval et)
+>          unifyTerms (eval at) (eval et)
 >     let ar = zipWith (\n -> offsetFree 1 . subPs n) [0..] $ parameterizeAll $ iArity i
 >     extendAll (tType: ar) $ inferS tt
 >     zipWithM constr (zip [0..] $ iConstructors i) ts
@@ -265,7 +281,7 @@ and we're effectively just perfoming type checking. The entire
 monad transformer stack for `MonadInfer Void` (the inference monad
 for non-parameterized expressions) is as follows:
 
-> type InferE a = UnifyEqT Term (ExceptT TypeError (InfT String (Reader [(String, Term)]))) a
+> type InferE a = UnifyEqT (Context String Void) (ExceptT TypeError (InfT String (Reader [(String, Term)]))) a
 
 We can add a function to actually run an instance of this monad,
 potentially failing with a `TypeError`:
@@ -315,7 +331,7 @@ Once again, we define a specailized version of `infer` for products:
 >     do
 >         t' <- eval <$> infer t
 >         -- This is a hack to make Void type inference work.
->         intoProduct t' <|> (freshProd >>= unify t' >>= intoProduct)
+>         intoProduct t' <|> (freshProd >>= unifyTerms t' >>= intoProduct)
 >     where freshProd = liftA2 Prod (Param <$> fresh) (Param <$> fresh)
 
 Just as we may want to cast a data type into a product, we may also want to cast
