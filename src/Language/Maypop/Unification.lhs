@@ -8,6 +8,7 @@ used for type inference.
 > {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 > {-# LANGUAGE TupleSections #-}
 > {-# LANGUAGE UndecidableInstances #-}
+> {-# LANGUAGE StandaloneDeriving #-}
 > module Language.Maypop.Unification where
 > import Language.Maypop.InfiniteList
 > import Language.Maypop.Eval
@@ -104,6 +105,27 @@ to manually define.
 > instance MonadState s m => MonadState s (UnifyT k v m) where
 >     get = lift $ get
 >     put x = lift $ put x
+
+Now that we have defined various `Monad*` instances for `UnifyT`, it is time
+to define `MonadUnify` instances for various monad transformers `*T`:
+
+> instance (Monoid w, MonadUnify k v m) => MonadUnify k v (WriterT w m) where
+>     fresh = lift $ fresh
+>     bind k v = lift $ bind k v
+>     merge k1 k2 = lift $ merge k1 k2
+>     reify v = lift $ reify v
+>
+> instance MonadUnify k v m => MonadUnify k v (StateT s m) where
+>     fresh = lift $ fresh
+>     bind k v = lift $ bind k v
+>     merge k1 k2 = lift $ merge k1 k2
+>     reify v = lift $ reify v
+>
+> instance MonadUnify k v m => MonadUnify k v (ReaderT r m) where
+>     fresh = lift $ fresh
+>     bind k v = lift $ bind k v
+>     merge k1 k2 = lift $ merge k1 k2
+>     reify v = lift $ reify v
 
 Finally, we write a couple of functions to actually run computations inside
 `UnifyT`:
