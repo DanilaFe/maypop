@@ -21,6 +21,8 @@ Let's work on type inference a little.
 > import Data.Maybe
 > import qualified Data.Map as Map
 
+{{< todo >}}Explain the names in the environment.{{< /todo >}}
+
 First, a little utility function to compute the type of a type. This
 is straight out of the paper on the Calculus of Inductive Constructions.
 Prop has the type \\(\\text{Type}_0\\), and each type \\(\\text{Type}\_n\\) has type \\(\\text{Type}\_{n+1}\\).
@@ -68,8 +70,8 @@ can define a trivial type class instance, `MonadInfer k`, which implies
 all of the other common constraints. The `k` in this definition is the type
 of parameters that our terms are parameterized by.
 
-> class (MonadReader [ParamTerm k] m, MonadError TypeError m, MonadUnify k (ParamTerm k) m, MonadInf String m) => MonadInfer k m where
-> instance (MonadReader [ParamTerm k] m, MonadError TypeError m, MonadUnify k (ParamTerm k) m, MonadInf String m) => MonadInfer k m where
+> class (MonadReader [(String, ParamTerm k)] m, MonadError TypeError m, MonadUnify k (ParamTerm k) m, MonadInf String m) => MonadInfer k m where
+> instance (MonadReader [(String, ParamTerm k)] m, MonadError TypeError m, MonadUnify k (ParamTerm k) m, MonadInf String m) => MonadInfer k m where
 
 Finally, on to the type inference function. We use the `MonadReader`
 typeclass to require read-only access to the local environment \\(\\Gamma\\).
@@ -82,7 +84,7 @@ to do is look in the current context to see what the index
 corresponds to. It's possible that the index corresponds to
 nothing; in this case, we throw the `FreeVariable` type error.
 
-> infer (Ref n) = nth n <$> ask >>= maybe (throwError (FreeVariable n)) return
+> infer (Ref n) = nth n . map snd <$> ask >>= maybe (throwError (FreeVariable n)) return
 
 The type of a function is simply its full type. This type is initially
 a `Term`, but, since we're performing inference over potentially parameterized
@@ -263,25 +265,19 @@ and we're effectively just perfoming type checking. The entire
 monad transformer stack for `MonadInfer Void` (the inference monad
 for non-parameterized expressions) is as follows:
 
-> type InferE a = UnifyEqT Term (ExceptT TypeError (InfT String (Reader [Term]))) a
+> type InferE a = UnifyEqT Term (ExceptT TypeError (InfT String (Reader [(String, Term)]))) a
 
 We can add a function to actually run an instance of this monad,
 potentially failing with a `TypeError`:
 
-> runInferE :: [Term] -> InferE a -> Either TypeError a
-> runInferE ts m = runReader (runInfT (runExceptT $ runUnifyEqT m)) ts
+> runInferE :: InferE a -> Either TypeError a
+> runInferE m = runReader (runInfT (runExceptT $ runUnifyEqT m)) []
 
-We also write a couple of functions to specifically run
+We also write a function to specifically run
 our `infer`, which is special case of `runInferE`.
 
-> runInfer' :: [Term] -> Term -> Either TypeError Term
-> runInfer' ts = runInferE ts . infer
-
-For when we are performing inference in an empty environment,
-we can define yet another specialized function, `runInfer`:
-
 > runInfer :: Term -> Either TypeError Term
-> runInfer = runInfer' []
+> runInfer = runInferE . infer
 
 Our definition of `infer` contains a few utility functions in the; let's take a look
 at all of them in turn. First up is the family of `infer*` functions, which
@@ -354,7 +350,10 @@ abstraction, leading us to use `offsetFree`. Thus, extending the environment loo
 > extend t m = extend' t $ const m
 >
 > extend' :: MonadInfer k m => ParamTerm k -> (Sort -> m a) -> m a
-> extend' t f = inferS t >>= \u -> local (map (offsetFree 1) . (t:)) (f u)
+> extend' t f = do
+>     s <- inferS t
+>     b <- pop
+>     local (map (second $ offsetFree 1) . ((b,t):)) (f s)
 >
 > extendAll :: MonadInfer k m => [ParamTerm k] -> m a -> m a
 > extendAll = flip (foldr extend)
@@ -390,6 +389,6 @@ Finally, we check an entire module by extracting all the function
 definitions, and running `checkFunction` on each of them in turn.
 
 > checkModule :: Module -> Either TypeError ()
-> checkModule m = runInferE []
+> checkModule m = runInferE
 >     $ mapM_ checkFunction $ catMaybes
 >     $ map (asFunction . dContent) $ Map.elems $ mDefinitions m
