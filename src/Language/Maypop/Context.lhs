@@ -238,9 +238,3 @@ define `Unifiable` for `Context b k`.
 >         { ctxValue = substituteInContext (ctxBinders ct') k ct <$> ctxValue ct'
 >         , ctxType = substituteInContext (ctxBinders ct') k ct <$> ctxType ct'
 >         }
->
-> test :: Maybe (Context String String)
-> test = runInfT (runUnifyT (unify (Context [] Nothing $ Just $ Let (Ref 0) (Ref 1)) (Context [] Nothing $ Just $ Let (Param "a") (Param "a"))))
->
-> test' :: Maybe (ParamTerm String)
-> test' = runInfT (runUnifyT (unify (Let (Ref 0) (Ref 1)) (Let (Param "a") (Param "a"))) :: InfT String Maybe (ParamTerm String))

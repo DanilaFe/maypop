@@ -267,33 +267,3 @@ using the same constructor; thus, we mostly include those cases in our pattern m
 For cases like `App`, `Abs`, and `Prod`, two recursive calls to `unify` suffice; however,
 for more complex terms such as `Case`, we have to do testing to ensure that the non-`Term`
 data matches, too.
-
-> instance Eq k => Unifiable k (ParamTerm k) where
->     unify t1 t2 = unify' (eval t1) (eval t2)
->         where
->             unify' (Ref x1) (Ref x2) | x1 == x2 = return $ Ref x1
->             unify' (Fun f1) (Fun f2) | f1 == f2 = return $ Fun f1
->             unify' (Fix f1) (Fix f2) | f1 == f2 = return $ Fix f1
->             unify' (Abs l1 r1) (Abs l2 r2) = liftA2 Abs (unify l1 l2) (unify r1 r2)
->             unify' (App l1 r1) (App l2 r2) = liftA2 App (unify l1 l2) (unify r1 r2)
->             unify' (Let l1 r1) (Let l2 r2) = liftA2 Let (unify l1 l2) (unify r1 r2)
->             unify' (Prod l1 r1) (Prod l2 r2) = liftA2 Prod (unify l1 l2) (unify r1 r2)
->             unify' (Sort s1) (Sort s2) | s1 == s2 = return $ Sort s1
->             unify' (Constr ind1 ci1) (Constr ind2 ci2)
->                 | ci1 == ci2 && ind1 == ind2 = return $ Constr ind1 ci1
->             unify' (Ind i1) (Ind i2) | i1 == i2 = return $ Ind i1
->             unify' (Case t1 ind1 tt1 ts1) (Case t2 ind2 tt2 ts2)
->                 | ind1 == ind2 = liftA3 (`Case` ind1) (unify t1 t2) (unify tt1 tt2) (zipWithM unify ts1 ts2)
->             unify' (Param k1) (Param k2) = merge k1 k2 >> return (Param k1)
->             unify' (Param k1) t = bind k1 t
->             unify' t (Param k2) = bind k2 t
->             unify' _ _ = mzero
->     occurs = elem
->     substitute k v = subst
->         where
->             subst (Abs l r) = Abs (subst l) (subst r)
->             subst (App l r) = App (subst l) (subst r)
->             subst (Prod l r) = Prod (subst l) (subst r)
->             subst (Case t i tt ts) = Case (subst t) i (subst tt) (map subst ts)
->             subst (Param k') | k == k' = v
->             subst t = t
