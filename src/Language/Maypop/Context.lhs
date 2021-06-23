@@ -2,6 +2,9 @@ In this module we define unification contexts, which are essential for the corre
 of our type inference.
 
 > {-# LANGUAGE FlexibleContexts #-}
+> {-# LANGUAGE FlexibleInstances #-}
+> {-# LANGUAGE MultiParamTypeClasses #-}
+> {-# LANGUAGE TypeFamilies #-}
 > module Language.Maypop.Context where
 > import Language.Maypop.Syntax
 > import Language.Maypop.InfiniteList
@@ -31,6 +34,7 @@ annotate each binder we come across with a unique identifier, perhaps as
 \\(\\text{pair}\\ (\\lambda^a. ?1)\\ (\\lambda^b. ?2)\\). Then, DeBrujin
 indices effectively become \\(0^a\\) and \\(0^b\\): clearly two different things.
 
+{{< todo >}}Out of date.{{< /todo >}}
 Finally, it is useful to know the type of a particular unification variable. We may
 not always know it, but in such cases, we can always represent this type by yet
 another unification variable. This is the last piece we need to define our `Context`
@@ -38,9 +42,10 @@ data type:
 
 > data Context b k = Context
 >     { ctxBinders :: [b]
->     , ctxType :: ParamTerm k
+>     , ctxType :: Maybe (ParamTerm k)
 >     , ctxValue :: Maybe (ParamTerm k)
 >     }
+>     deriving Show
 
 In the above, the actual value of a particular unification variable, `ctxValue`,
 is held in a `Maybe`, since the context of a unification variable can be known
@@ -91,8 +96,8 @@ Now, we can define a function that, given a common prefix computed with `common`
 attempts to strengthen a context's term. If the term is not known, then strengthenning
 trivially succeeds, still resulting in a `Nothing` term.
 
-> matchPrefix :: (Eq k, MonadPlus m) => [b] -> Context b k -> m (Maybe (ParamTerm k))
-> matchPrefix bs ctx = traverse (strengthen by) (ctxValue ctx)
+> matchPrefix :: (Eq k, MonadPlus m) => [b] -> (Context b k -> (Maybe (ParamTerm k))) -> Context b k -> m (Maybe (ParamTerm k))
+> matchPrefix bs f ctx = traverse (strengthen by) (f ctx)
 >     where by = length (ctxBinders ctx) - length bs
 
 One we have two such strengthened terms, both wrapped in `Maybe`s, we need to combine them.
@@ -174,30 +179,28 @@ current binding context, which it must be compatible with.
 >     => k -> Maybe (ParamTerm k) -> m ()
 > bindTerm k mt = do
 >     bs' <- ask
->     tt <- Param <$> fresh
->     void $ bind k (Context bs' tt mt)
+>     void $ bind k (Context bs' Nothing mt)
 
 Just as we need a standalone term unification function to perform context
 unification, we also need a standalone term _substitution_ function to
 perform context substitution. In this case, we begin substitution in
 some context `bs`, attempting to substitute some parameter `k` in
-a term `t` with the term from another context `ctx`.
+a term `t` with the term from another context `ctx`. To help re-use
+our existing logic, we once again take advantage of `MonadReader` and `MonadInf`;
+however, we start the `MonadInf` anew, and thus, cannot rely on the uniqueness
+of names. We merely use our new stack of names to count the number of surrounding
+binders.
 
-> substituteInContext
->     :: (Eq b, Eq k, MonadUnify k (Context b k) m, MonadInf b m)
->     => [b] -> k -> Context b k -> ParamTerm k -> m (ParamTerm k)
-> substituteInContext bs k ctx t = runReaderT (subst t) bs
+> substituteInContext :: (Eq k, Infinite b) => [b] -> k -> Context b k -> ParamTerm k -> ParamTerm k
+> substituteInContext bs k ctx t = runInf (runReaderT (subst t) bs)
 >     where
 >         subst t@(Param k') | k == k' = do
 >             bs' <- ask
->             let prefix = common (ctxBinders ctx) bs'
->             mst <- fmap (weaken (length bs' - length prefix)) <$> matchPrefix prefix ctx
->             case mst of
->                 Nothing -> do
->                     tt <- Param <$> fresh
->                     bind k $ Context prefix tt Nothing
->                     return t
->                 Just st -> return st
+>             let off = length (ctxBinders ctx) - length bs'
+>             let st' = if off >= 0
+>                  then ctxValue ctx >>= strengthen off
+>                  else weaken (-off) <$> ctxValue ctx
+>             return $ fromMaybe t st'
 >         subst (Abs l r) = liftA2 Abs (subst l) (withBinder $ subst r)
 >         subst (App l r) = liftA2 App (subst l) (subst r)
 >         subst (Let l r) = liftA2 Let (subst l) (withBinder $ subst r)
@@ -212,4 +215,32 @@ a term `t` with the term from another context `ctx`.
 Now that we know how to unify and substitute terms, we can finally
 define `Unifiable` for `Context b k`.
 
-> 
+> combineTerms
+>     :: (Eq k, MonadUnify k (Context b k) m, MonadInf b m)
+>     => [b] -> (Context b k -> Maybe (ParamTerm k))
+>     -> Context b k -> Context b k -> m (Maybe (ParamTerm k))
+> combineTerms bs f ct1 ct2 = join
+>     $ combine (unifyInContext bs)
+>     <$> (matchPrefix bs f ct1)
+>     <*> (matchPrefix bs f ct2)
+
+> instance (Eq k, Eq b, Infinite b) => Unifiable k (Context b k) where
+>     type ExtraClass (Context b k) m = MonadInf b m
+>
+>     unify ct1 ct2 = do
+>         let prefix = common (ctxBinders ct1) (ctxBinders ct2)
+>         mt <- combineTerms prefix ctxType ct1 ct2
+>         mv <- combineTerms prefix ctxValue ct1 ct2
+>         return $ Context prefix mt mv
+>     occurs k ctx = fromMaybe False
+>         $ liftA2 (||) (elem k <$> ctxType ctx) (elem k <$> ctxValue ctx)
+>     substitute k ct ct' = ct'
+>         { ctxValue = substituteInContext (ctxBinders ct') k ct <$> ctxValue ct'
+>         , ctxType = substituteInContext (ctxBinders ct') k ct <$> ctxType ct'
+>         }
+>
+> test :: Maybe (Context String String)
+> test = runInfT (runUnifyT (unify (Context [] Nothing $ Just $ Let (Ref 0) (Ref 1)) (Context [] Nothing $ Just $ Let (Param "a") (Param "a"))))
+>
+> test' :: Maybe (ParamTerm String)
+> test' = runInfT (runUnifyT (unify (Let (Ref 0) (Ref 1)) (Let (Param "a") (Param "a"))) :: InfT String Maybe (ParamTerm String))

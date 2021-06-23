@@ -15,6 +15,7 @@ we need an infinite supply of fresh unifiction variables.
 > import Control.Monad.Identity
 > import Control.Monad.Reader
 > import Control.Monad.Except
+> import Control.Applicative
 
 The definition of an `InfList` is extremely simple. It's just a list
 without a base case! Thanks to Haskell's lazy evaluation, this
@@ -84,7 +85,7 @@ of `MonadState`, to allow other library code to combine `InfT` with its own
 state as needed.
 
 > newtype InfT k m a = MkInfT { unwrapInfT :: StateT (InfList k) m a }
->     deriving (Functor, Applicative, Monad, MonadTrans)
+>     deriving (Functor, Applicative, Monad, MonadTrans, Alternative, MonadPlus, MonadReader r)
 
 The implementation of the `pop` operation is pretty the same as what we
 described above.
@@ -109,13 +110,13 @@ a computation in the underlying monad `m`. Since `InfT` is effectively an alias
 for `StateT`, our new function merely invokes `runStateT`, and cleans up
 by throwing away the unused remainder of the infinite list.
 
-> runInfT :: Monad m => InfT k m a -> InfList k -> m a
-> runInfT m ks = fst <$> runStateT (unwrapInfT m) ks
+> runInfT :: (Infinite k, Monad m) => InfT k m a -> m a
+> runInfT m = fst <$> runStateT (unwrapInfT m) infList
 
 For the trivial case in which there _is_ no underlying computation, we define
 a type alias `Inf`, and a corresponding `runInf` function:
 
 > type Inf k a = InfT k Identity a
 >
-> runInf :: Inf k a -> InfList k -> a
-> runInf m ks = runIdentity $ runInfT m ks
+> runInf :: (Infinite k) => Inf k a -> a
+> runInf = runIdentity . runInfT

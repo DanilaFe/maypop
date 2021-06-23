@@ -9,6 +9,8 @@ Let's work on type inference a little.
 > import Language.Maypop.Syntax
 > import Language.Maypop.Eval
 > import Language.Maypop.Modules
+> import Language.Maypop.Context
+> import Language.Maypop.InfiniteList
 > import Language.Maypop.Unification hiding (substitute)
 > import Control.Monad.Reader
 > import Control.Monad.Except
@@ -66,8 +68,8 @@ can define a trivial type class instance, `MonadInfer k`, which implies
 all of the other common constraints. The `k` in this definition is the type
 of parameters that our terms are parameterized by.
 
-> class (MonadReader [ParamTerm k] m, MonadError TypeError m, MonadUnify k (ParamTerm k) m) => MonadInfer k m where
-> instance (MonadReader [ParamTerm k] m, MonadError TypeError m, MonadUnify k (ParamTerm k) m) => MonadInfer k m where
+> class (MonadReader [ParamTerm k] m, MonadError TypeError m, MonadUnify k (ParamTerm k) m, MonadInf String m) => MonadInfer k m where
+> instance (MonadReader [ParamTerm k] m, MonadError TypeError m, MonadUnify k (ParamTerm k) m, MonadInf String m) => MonadInfer k m where
 
 Finally, on to the type inference function. We use the `MonadReader`
 typeclass to require read-only access to the local environment \\(\\Gamma\\).
@@ -261,13 +263,13 @@ and we're effectively just perfoming type checking. The entire
 monad transformer stack for `MonadInfer Void` (the inference monad
 for non-parameterized expressions) is as follows:
 
-> type InferE a = UnifyEqT Term (ExceptT TypeError (Reader [Term])) a
+> type InferE a = UnifyEqT Term (ExceptT TypeError (InfT String (Reader [Term]))) a
 
 We can add a function to actually run an instance of this monad,
 potentially failing with a `TypeError`:
 
 > runInferE :: [Term] -> InferE a -> Either TypeError a
-> runInferE ts m = runReader (runExceptT $ runUnifyEqT m) ts
+> runInferE ts m = runReader (runInfT (runExceptT $ runUnifyEqT m)) ts
 
 We also write a couple of functions to specifically run
 our `infer`, which is special case of `runInferE`.

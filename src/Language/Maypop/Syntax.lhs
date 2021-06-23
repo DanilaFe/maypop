@@ -466,7 +466,7 @@ and 2 for \\(a\\).
 And now, the pretty printer itself.
 
 > pretty :: (Show a, Eq a) => ParamTerm a -> String
-> pretty t = runInf (runReaderT (prettyM 0 t) []) names
+> pretty t = runInf (runReaderT (prettyM 0 t) [])
 >     where
 >         collectProd (Prod l r) | occurs 0 r = first (l:) $ collectProd r
 >         collectProd e = ([], e)

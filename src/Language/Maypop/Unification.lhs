@@ -9,6 +9,9 @@ used for type inference.
 > {-# LANGUAGE TupleSections #-}
 > {-# LANGUAGE UndecidableInstances #-}
 > {-# LANGUAGE StandaloneDeriving #-}
+> {-# LANGUAGE ConstraintKinds #-}
+> {-# LANGUAGE KindSignatures #-}
+> {-# LANGUAGE TypeFamilies #-}
 > module Language.Maypop.Unification where
 > import Language.Maypop.InfiniteList
 > import Language.Maypop.Eval
@@ -24,6 +27,7 @@ used for type inference.
 > import Data.Maybe
 > import Data.Bifunctor
 > import Data.Void
+> import Data.Constraint
 
 We'll define an MTL-style typeclass that encapsulates unification functionality.
 Since
@@ -59,7 +63,10 @@ nice to replace occurences of _bound_ variables with the values they
 are bound to. For this, we also define a `substitute` method.
 
 > class Unifiable k v | v -> k where
->     unify :: MonadUnify k v m => v -> v -> m v
+>     type ExtraClass v (m :: * -> *) :: Constraint
+>     type ExtraClass v m = ()
+>
+>     unify :: (ExtraClass v m, MonadUnify k v m) => v -> v -> m v
 >     occurs :: k -> v -> Bool
 >     substitute :: k -> v -> v -> v
 
@@ -89,7 +96,7 @@ so the bulk of our work will be implementing the `MonadUnify` methods.
 
 > newtype UnifyT k v m a
 >     = MkUnifyT { unwrapUnifyT :: StateT (UnificationState k v) m a }
->     deriving (Functor, Applicative, Monad, Alternative, MonadTrans, MonadPlus, MonadReader r, MonadWriter w, MonadError e)
+>     deriving (Functor, Applicative, Monad, Alternative, MonadTrans, MonadPlus, MonadReader r, MonadWriter w, MonadError e, MonadInf b)
 
 For some reason, Haskell's `GeneralizedNewtypeDeriving` fails to compute the `MonadLogic`
 instance for `UnifyT`. We write it manually, instead.
@@ -179,7 +186,7 @@ to make map lookups possible in `UnificationState`, we place an additional
 `Ord` constraint on `k`. Since `UnifyT` is a monad transformer, this instance
 is polymorphic over a generic monad `m`.
 
-> instance (Unifiable k v, Infinite k, Ord k, Monad m, MonadPlus m) => MonadUnify k v (UnifyT k v m) where
+> instance (Unifiable k v, ExtraClass v (UnifyT k v m), Infinite k, Ord k, Monad m, MonadPlus m) => MonadUnify k v (UnifyT k v m) where
 >     fresh = MkUnifyT $ do
 >         (k, us) <- gets popVar
 >         put us >> return k
@@ -245,7 +252,7 @@ no new bindings can ever be introduced; it is thus possible to represent
 a "trivial unification" monad transformer as follows:
 
 > newtype UnifyEqT v m a = MkUnifyEqT { runUnifyEqT :: m a }
->     deriving (Functor, Applicative, Monad, MonadReader r, MonadWriter w, MonadState s, MonadError e, Alternative, MonadPlus)
+>     deriving (Functor, Applicative, Monad, MonadReader r, MonadWriter w, MonadState s, MonadError e, MonadInf b, Alternative, MonadPlus)
 
 We can define a very boring instance of `MonadUnify` for this data type:
 
