@@ -154,6 +154,7 @@ into equivalent lambda abstractions.
 >     , fArity :: [Term]
 >     , fType :: Term
 >     , fBody :: Term
+>     , fDec :: Maybe Int
 >     }
 
 It's always good to have in hand the _whole_ type of the function (`Args -> Return`).
@@ -190,21 +191,12 @@ contains a reference to itself, this reference can be replaced by the function's
 using \\(\\delta\\)-reduction. This new instance of the function's body would again contain
 the function's name, which can once again be \\(\\delta\\)-reduced. This can go infinitely,
 creating bigger and bigger terms. We certainly don't want that.
-
 To work around this, fixpoint functions are coupled with information about their "decreasing"
 parameter. Recursive calls to a function within its body must always contain a "smaller"
 argument than was given to them. For example, if `f l` is a function on lists, with `l`
 being its decreasing parameter, it cannot recursively call itself as `f (Cons x l)`,
-because `Cons x l` is bigger than `l`. We will encode this in a new data type, `Fixpoint`:
-
-> data Fixpoint = Fixpoint
->     { fxFun :: Function
->     , fxDecArg :: Int
->     }
->     deriving (Eq, Show)
-
-Here, `fxFun` refers to all the usual function-related data, and `fxDecArg` gives the number
-(0-indexed from the left of the parameter list) of the argument that must always be "shrinking".
+because `Cons x l` is bigger than `l`. We encode this as `fDec`, which contains the
+index of the function's decresing argument, if any.
 
 With the details of definitions out of the way, it's time to describe the terms in our language.
 There's a little trick to the way that we will define them: we'll parameterize
@@ -255,7 +247,6 @@ for the second constructor).
 > data ParamTerm a
 >     = Ref Int
 >     | Fun Function
->     | Fix Fixpoint
 >     | Param a
 >     | Abs (ParamTerm a) (ParamTerm a)
 >     | App (ParamTerm a) (ParamTerm a)
@@ -478,7 +469,6 @@ And now, the pretty printer itself.
 >         paren b s = if b then "(" ++ s ++ ")" else s
 >         prettyM _ (Ref i) = nth i <$> ask >>= maybe (return $ "??" ++ show i) return
 >         prettyM _ (Fun f) = return $ fName f
->         prettyM _ (Fix f) = return $ fName $ fxFun f
 >         prettyM _ (Param p) = return $ show p
 >         prettyM n (Abs t1 t2) = paren (n >= 10) <$> do
 >             newName <- pop

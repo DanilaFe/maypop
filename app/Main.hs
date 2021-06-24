@@ -21,7 +21,6 @@ printFunction f = mapM_ (putStrLn . ("  "++)) $
 runMain :: Module -> IO ()
 runMain m = case Map.lookup "main" (mDefinitions m) of
     Just Definition{dContent = FunDef f} -> putStrLn $ pretty $ eval (fBody f)
-    Just Definition{dContent = FixDef f} -> putStrLn $ pretty $ eval (fBody (fxFun f))
     _ -> putStrLn "No main function!"
 
 main :: IO ()

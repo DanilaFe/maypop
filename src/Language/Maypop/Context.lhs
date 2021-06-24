@@ -127,7 +127,6 @@ function as follows:
 >     where
 >         unify' (Ref x1) (Ref x2) | x1 == x2 = return $ Ref x1
 >         unify' (Fun f1) (Fun f2) | f1 == f2 = return $ Fun f1
->         unify' (Fix f1) (Fix f2) | f1 == f2 = return $ Fix f1
 >         unify' (Abs l1 r1) (Abs l2 r2) =
 >             liftA2 Abs (unify' l1 l2) (withBinder $ unify' r1 r2)
 >         unify' (App l1 r1) (App l2 r2) =

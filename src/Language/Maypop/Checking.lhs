@@ -100,7 +100,6 @@ terms, we need to call `parameterize`. The case for fixpoints is pretty much ide
 argument is irrelevant to a function's type.
 
 > infer (Fun f) = return $ parameterize $ fFullType f
-> infer (Fix f) = return $ parameterize $ fFullType $ fxFun f
 
 The case for parameters must be present, but I'm not currently
 sure what the best way of handling it is. For now, it remains

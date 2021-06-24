@@ -74,10 +74,8 @@ information.
 > data DefinitionContent 
 >     = IndDef Inductive
 >     | FunDef Function
->     | FixDef Fixpoint
 >
 > asFunction :: DefinitionContent -> Maybe Function
-> asFunction (FixDef f) = Just $ fxFun f
 > asFunction (FunDef f) = Just f
 > asFunction _ = Nothing
 >
@@ -93,7 +91,6 @@ the name of a definition, be it a function or an inductive definition.
 > dName :: Definition -> String
 > dName Definition{dContent=IndDef i} = iName i
 > dName Definition{dContent=FunDef f} = fName f
-> dName Definition{dContent=FixDef f} = fName (fxFun f)
 
 Finally, let's define a representation for a module:
 
@@ -155,7 +152,6 @@ of the same definition into one.
 >     = IndExport Inductive
 >     | ConExport Inductive Int
 >     | FunExport Function
->     | FixExport Fixpoint
 
 With that, we go ahead and define our two-map `GlobalScope`.
 
@@ -240,7 +236,6 @@ exports.
 >                     mapMWithIndex (tellCon i) $ iConstructors i
 >                 (Closed, IndDef i) -> tellExport n (IndExport i)
 >                 (Closed, FunDef f) -> tellExport n (FunExport f)
->                 (Closed, FixDef f) -> tellExport n (FixExport f)
 >                 (Open, _) -> throwError BadOpenImport
 
 For the above, we use a little utility, `mapMWithIndex`, which is a version
