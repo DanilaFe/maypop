@@ -5,7 +5,8 @@ and into the interpreter.
 > module Language.Maypop.Loading where
 > import Language.Maypop.Modules
 > import Language.Maypop.Checking
-> import Language.Maypop.Parser hiding (ImportError)
+> import Language.Maypop.Parser
+> import Language.Maypop.Resolver hiding (ImportError)
 > import Control.Monad.Except
 > import Control.Monad.Reader
 > import Data.Bool
