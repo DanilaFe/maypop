@@ -39,7 +39,11 @@ function objects or their DeBrujin indices.
 >     | InvalidFixpoint
 >     deriving Show
 >
-> data VarSize = Original | SmallerThan String | Unknown deriving Show
+> data VarSize = Self | Original | SmallerThan String | Unknown deriving Show
+>
+> data ResolveParam = SelfRef | Placeholder
+>
+> type ResolveTerm = S.ParamTerm ResolveParam
 >
 > varParent :: VarSize -> Maybe String
 > varParent (SmallerThan s) = Just s
@@ -94,6 +98,13 @@ function objects or their DeBrujin indices.
 > instance (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ResolveError m, MonadFix m)
 >     => MonadResolver m where
 >
+> elaborate :: MonadResolver m => ResolveTerm -> m S.Term
+> elaborate = undefined
+>
+> elaborateParams :: MonadResolver m => [ResolveTerm] -> ResolveTerm -> m ([S.Term], S.Term)
+> elaborateParams ps r = elaborate t >>= liftEither . collectFunArgs (map (const "") ps)
+>     where t = foldr S.App r ps
+>
 > withNoDecreasing :: MonadState ResolveState m => m a -> m a
 > withNoDecreasing m = do
 >     dec <- gets rsDecreasing
@@ -131,7 +142,7 @@ function objects or their DeBrujin indices.
 > emitConstructors i = zipWithM_ emitConstructor [0..] (iConstructors i)
 >     where emitConstructor ci c = emitExport (cName c) (ConExport i ci)
 >
-> exportToTerm :: Export -> S.Term
+> exportToTerm :: Export -> S.ParamTerm a
 > exportToTerm e = case eVariant e of
 >     FunExport f -> S.Fun f
 >     ConExport i ci -> S.Constr i ci
@@ -153,18 +164,18 @@ function objects or their DeBrujin indices.
 >         smallerParams <- smallerParams <$> mapM termSize params
 >         emitDecreasing smallerParams
 > 
-> lookupUnqual :: MonadResolver m => String -> m S.Term
+> lookupUnqual :: MonadResolver m => String -> m (S.ParamTerm a)
 > lookupUnqual s = do
 >     asks reCurrentFun >>= maybe (return ()) (recordFixpoint s)
 >     es <- gets (fromMaybe [] . Map.lookup (unqualName s) . sUnqualified . rsScope)
 >     exportToTerm <$> narrowExports es
 >
-> lookupQual :: MonadResolver m => Symbol -> m S.Term
+> lookupQual :: MonadResolver m => Symbol -> m (S.ParamTerm a)
 > lookupQual s = do
 >     me <- gets (Map.lookup s . sQualified . rsScope)
 >     maybe (throwError UnknownReference) (return . exportToTerm) me
 >
-> lookupRef :: MonadResolver m => ParseRef -> m S.Term
+> lookupRef :: MonadResolver m => ParseRef -> m (S.ParamTerm a)
 > lookupRef (SymRef s) = lookupQual s
 > lookupRef (StrRef s) = lookupUnqual s
 >
@@ -182,10 +193,10 @@ function objects or their DeBrujin indices.
 >      then return (i, is)
 >      else throwError InvalidArity
 >
-> resolveBranch :: MonadResolver m => VarSize -> ParseBranch -> m (String, S.Term)
+> resolveBranch :: MonadResolver m => VarSize -> ParseBranch -> m (String, ResolveTerm)
 > resolveBranch vs (s, ps, t) = (,) s <$> withSizedVars vs ps (resolveTerm t)
 >
-> matchBranch :: MonadResolver m => [(String, S.Term)] -> Constructor -> m S.Term
+> matchBranch :: MonadResolver m => [(String, ResolveTerm)] -> Constructor -> m ResolveTerm
 > matchBranch bs c = maybe (throwError IncompleteMatch) return $ lookup (cName c) bs 
 >
 > termSize :: MonadResolver m => ParseTerm -> m (Maybe (String, VarSize))
@@ -200,7 +211,7 @@ function objects or their DeBrujin indices.
 >         Just (_, vs) -> vs
 >         _ -> Unknown
 >
-> resolveTerm :: MonadResolver m => ParseTerm -> m S.Term
+> resolveTerm :: MonadResolver m => ParseTerm -> m ResolveTerm
 > resolveTerm (Ref (StrRef s)) = do
 >     vref <- lookupVar s
 >     case vref of
@@ -242,16 +253,13 @@ function objects or their DeBrujin indices.
 >          return $ Function (pfName f) ats rt fb dec
 >     return f'
 >
-> collectFunArgs :: [String] -> S.Term -> Either ResolveError ([S.Term], S.Term)
+> collectFunArgs :: [String] -> (S.ParamTerm a) -> Either ResolveError ([S.ParamTerm a], S.ParamTerm a)
 > collectFunArgs [] t = return $ ([], t)
 > collectFunArgs (_:xs) (S.Prod l r) = first (l:) <$> collectFunArgs xs r
 > collectFunArgs _ _ = throwError InvalidArity
 >
-> resolveParams :: MonadResolver m => [ParseParam] -> m [S.Term]
+> resolveParams :: MonadResolver m => [ParseParam] -> m [ResolveTerm]
 > resolveParams = foldr (\(x, t) m -> liftA2 (:) (resolveTerm t) (withVar x m)) (return [])
->
-> resolveWithParams :: MonadResolver m => [ParseParam] -> m a -> m ([S.Term], a)
-> resolveWithParams ps m = foldr (\(x, t) m -> liftA2 (first . (:)) (resolveTerm t) (withVar x m)) ((,) [] <$> m) ps
 >
 > resolveConstr :: MonadResolver m => ParseConstr -> m S.Constructor
 > resolveConstr pc = do
