@@ -13,6 +13,10 @@ function objects or their DeBrujin indices.
 > import qualified Language.Maypop.Syntax as S
 > import Language.Maypop.Modules
 > import Language.Maypop.Parser
+> import Language.Maypop.Unification
+> import Language.Maypop.Context
+> import Language.Maypop.InfiniteList
+> import Language.Maypop.Checking hiding (NotInductive)
 > import Control.Applicative hiding ((<|>), many)
 > import Control.Monad.Reader
 > import Control.Monad.State
@@ -28,7 +32,7 @@ function objects or their DeBrujin indices.
 > import Data.List
 > import Data.Maybe
 > import Data.Functor.Identity
-
+>
 > data ResolveError
 >     = UnknownReference
 >     | AmbiguousReference
@@ -36,6 +40,7 @@ function objects or their DeBrujin indices.
 >     | InvalidArity
 >     | IncompleteMatch
 >     | ImportError ImportError
+>     | InferError TypeError
 >     | InvalidFixpoint
 >     deriving Show
 >
@@ -98,12 +103,49 @@ function objects or their DeBrujin indices.
 > instance (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ResolveError m, MonadFix m)
 >     => MonadResolver m where
 >
-> elaborate :: MonadResolver m => ResolveTerm -> m S.Term
-> elaborate = undefined
+> instantiate :: MonadInfer k m => Maybe k -> ResolveTerm -> m (S.ParamTerm k)
+> instantiate mt = traverse inst
+>     where
+>         self = maybe mzero return mt
+>         inst SelfRef = self
+>         inst Placeholder = fresh
 >
-> elaborateParams :: MonadResolver m => [ResolveTerm] -> ResolveTerm -> m ([S.Term], S.Term)
-> elaborateParams ps r = elaborate t >>= liftEither . collectFunArgs (map (const "") ps)
->     where t = foldr S.App r ps
+> strip :: MonadInfer k m => S.ParamTerm k -> m S.Term
+> strip t = reifyTerm t >>= traverse (const mzero)
+> 
+> mkSelf :: MonadInfer k m => S.Term -> m k
+> mkSelf t = do
+>     k <- fresh
+>     bind k (Context [] (Just $ parameterize t) Nothing)
+>     return k
+>
+> mkMSelf :: MonadInfer k m => Maybe S.Term -> m (Maybe k) 
+> mkMSelf = traverse mkSelf
+>
+> elaborateInEnv :: MonadResolver m => Maybe S.Term -> [ResolveTerm] -> ResolveTerm -> m ([S.Term], S.Term)
+> elaborateInEnv mt env t = inferWithin $ do
+>     self <- mkMSelf mt
+>     ienv <- mapM (instantiate self) env
+>     it <- instantiate self t
+>     infer $ foldl (flip S.Abs) it ienv
+>     liftA2 (,) (mapM strip ienv) (strip it)
+>
+> elaborateInd :: MonadResolver m => [ResolveTerm] -> Sort -> m [S.Term]
+> elaborateInd env s = fst <$> elaborateInEnv Nothing env (S.Sort s)
+>
+> elaborateConstr :: MonadResolver m => S.Term -> [ResolveTerm] -> [ResolveTerm] -> m ([S.Term], [S.Term])
+> elaborateConstr t env is = inferWithin $ do
+>     self <- mkSelf t
+>     ienv <- mapM (instantiate $ Just self) env
+>     iis <- mapM (instantiate $ Just self) is
+>     infer $ foldl (flip S.Abs) (foldl S.App (S.Param self) iis) ienv
+>     liftA2 (,) (mapM strip ienv) (mapM strip iis)
+>
+> elaborate :: MonadResolver m => Maybe S.Term -> ResolveTerm -> m S.Term
+> elaborate mt t = snd <$> elaborateInEnv mt [] t
+>
+> inferWithin :: MonadResolver m => InferU String a -> m a
+> inferWithin m = liftEither $ first InferError $ runInferU m 
 >
 > withNoDecreasing :: MonadState ResolveState m => m a -> m a
 > withNoDecreasing m = do
@@ -245,10 +287,11 @@ function objects or their DeBrujin indices.
 >
 > resolveFun :: MonadResolver m => ParseFun -> m Function
 > resolveFun f = do
->     fts <- resolveTerm (pfType f)
+>     fts <- resolveTerm (pfType f) >>= elaborate Nothing
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
 >     rec f' <- withNoDecreasing $ withFun f $ emitFun (pfName f) f' >> do
->          fb <- withSizedVars Original (pfArity f) $ resolveTerm (pfBody f)
+>          (_, fb) <- withSizedVars Original (pfArity f) $ resolveTerm (pfBody f)
+>              >>= elaborateInEnv (Just fts) (map parameterize ats)
 >          dec <- findDecreasing (pfArity f)
 >          return $ Function (pfName f) ats rt fb dec
 >     return f'
@@ -261,17 +304,20 @@ function objects or their DeBrujin indices.
 > resolveParams :: MonadResolver m => [ParseParam] -> m [ResolveTerm]
 > resolveParams = foldr (\(x, t) m -> liftA2 (:) (resolveTerm t) (withVar x m)) (return [])
 >
-> resolveConstr :: MonadResolver m => ParseConstr -> m S.Constructor
-> resolveConstr pc = do
->     ps' <- resolveParams (pcParams pc)
+> resolveConstr :: MonadResolver m => S.Term -> [S.Term] -> ParseConstr -> m S.Constructor
+> resolveConstr it ips pc = do
+>     ps' <- (++ parameterizeAll ips) <$> resolveParams (pcParams pc)
 >     is' <- withVars (fst $ unzip $ pcParams pc) $ mapM resolveTerm (pcIndices pc)
->     return $ Constructor ps' is' (pcName pc)
+>     (ps'', is'') <- elaborateConstr it ps' is'
+>     return $ Constructor ps'' is'' (pcName pc)
 >
 > resolveInd :: MonadResolver m => ParseInd -> m S.Inductive
 > resolveInd pi = do
->     (ps', is') <- splitAt (length $ piParams pi) <$> resolveParams (piParams pi ++ piArity pi)
+>     its <- resolveParams (piParams pi ++ piArity pi) >>= (`elaborateInd` piSort pi)
+>     let it = foldr S.Prod (S.Sort $ piSort pi) its
+>     let (ps', is') = splitAt (length $ piParams pi) its
 >     rec i' <- emitInd (piName pi) i' >> do
->          cs <- withVars (map fst $ piParams pi) $ mapM resolveConstr (piConstructors pi)
+>          cs <- withVars (map fst $ piParams pi) $ mapM (resolveConstr it ps') (piConstructors pi)
 >          return $ Inductive ps' is' (piSort pi) cs (piName pi)
 >     emitConstructors i'
 >     return i'

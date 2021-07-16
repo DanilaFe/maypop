@@ -4,6 +4,7 @@ Here, I'll define what a Maypop "term" is.
 > {-# LANGUAGE FlexibleInstances #-}
 > {-# LANGUAGE DeriveFunctor #-}
 > {-# LANGUAGE DeriveFoldable #-}
+> {-# LANGUAGE DeriveTraversable #-}
 > module Language.Maypop.Syntax where
 > import Language.Maypop.InfiniteList
 > import Control.Applicative
@@ -256,7 +257,7 @@ for the second constructor).
 >     | Constr Inductive Int
 >     | Ind Inductive
 >     | Case (ParamTerm a) Inductive (ParamTerm a) [(ParamTerm a)]
->     deriving (Eq, Show, Functor, Foldable)
+>     deriving (Eq, Show, Functor, Foldable, Traversable)
 >
 > type Term = ParamTerm Void
 
