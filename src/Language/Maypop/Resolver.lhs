@@ -56,11 +56,21 @@ function objects or their DeBrujin indices.
 > varParent (SmallerThan s) = Just s
 > varParent _ = Nothing
 >
+> data CurrentInd = CurrentInd
+>     { ciParams :: [S.Term]
+>     , ciIndices :: [S.Term]
+>     , ciParsed :: ParseInd
+>     }
+>
+> data CurrentFun = CurrentFun
+>     { cfParams :: [S.Term]
+>     , cfParsed :: ParseFun
+>     }
+>
 > data CurrentDef = CurrentDef
->     { cdTerm :: S.Term
+>     { cdFutureTerm :: S.Term
 >     , cdType :: S.Term
->     , cdParams :: [S.Term]
->     , cdParse :: Either ParseInd ParseFun
+>     , cdExtra :: Either CurrentInd CurrentFun
 >     }
 >
 > data ResolveEnv = ResolveEnv
@@ -83,16 +93,16 @@ function objects or their DeBrujin indices.
 > withVars xs m = foldr withVar m xs
 >
 > withFun :: MonadReader ResolveEnv m => S.Term -> S.Term -> [S.Term] -> ParseFun -> m a -> m a
-> withFun t tt ps f = local $ \re -> re { reCurrentDef = Just (CurrentDef t tt ps $ Right f) }
+> withFun t tt ps f = local $ \re -> re { reCurrentDef = Just (CurrentDef t tt $ Right $ CurrentFun ps f) }
 >
 > withFunction :: MonadReader ResolveEnv m => S.Term -> S.Term -> [S.Term] -> ParseFun -> m a -> m a
 > withFunction t tt ps f = withFun t tt ps f . withSizedVar Self (pfName f) . withSizedVars Original (pfArity f)
 >
-> withInd :: MonadReader ResolveEnv m => S.Term -> S.Term -> [S.Term] -> ParseInd -> m a -> m a
-> withInd t tt ps i = local $ \re -> re { reCurrentDef = Just (CurrentDef t tt ps $ Left i) }
+> withInd :: MonadReader ResolveEnv m => S.Term -> S.Term -> [S.Term] -> [S.Term] -> ParseInd -> m a -> m a
+> withInd t tt ps is i = local $ \re -> re { reCurrentDef = Just (CurrentDef t tt $ Left $ CurrentInd ps is i) }
 >
-> withInductive :: MonadReader ResolveEnv m => S.Term -> S.Term -> [S.Term] -> ParseInd -> m a -> m a
-> withInductive t tt ps pi = withInd t tt ps pi . withSizedVar Self (piName pi) . withVars (map fst $ piParams pi)
+> withInductive :: MonadReader ResolveEnv m => S.Term -> S.Term -> [S.Term] -> [S.Term] -> ParseInd -> m a -> m a
+> withInductive t tt ps is pi = withInd t tt ps is pi . withSizedVar Self (piName pi) . withVars (map fst $ piParams pi)
 >
 > withApp :: MonadReader ResolveEnv m => ParseTerm -> m a -> m a
 > withApp pt = local $ \re -> re { reApps = pt : reApps re }
@@ -134,7 +144,10 @@ function objects or their DeBrujin indices.
 >         inst Placeholder = fresh
 >
 > strip :: MonadInfer k m => S.ParamTerm k -> m S.Term
-> strip t = reifyTerm t >>= traverse (const (throwError undefined))
+> strip = traverse (const (throwError undefined))
+>
+> subst :: k -> S.Term -> S.ParamTerm k -> S.ParamTerm k
+> subst = undefined
 > 
 > mkSelf :: MonadInfer k m => S.Term -> m k
 > mkSelf t = do
@@ -148,44 +161,44 @@ function objects or their DeBrujin indices.
 > selfType :: MonadResolver m => m (Maybe S.Term)
 > selfType = asks (fmap cdType . reCurrentDef)
 >
-> selfData :: MonadResolver m => (Either ParseInd ParseFun -> Bool) -> m (S.Term, S.Term, [S.Term])
-> selfData f = do
->     currentDef <- asks reCurrentDef
->     case currentDef of
->         Just cd | f (cdParse cd) -> return (cdTerm cd, cdType cd, cdParams cd)
->         _ -> throwError InvalidFixpoint
+> selfInductive :: MonadResolver m => m (CurrentDef, CurrentInd)
+> selfInductive = undefined
 >
-> selfInductive :: MonadResolver m => m (S.Term, S.Term, [S.Term])
-> selfInductive = selfData isLeft
+> selfFunction :: MonadResolver m => m (CurrentDef, CurrentFun)
+> selfFunction = undefined
 >
-> selfFunction :: MonadResolver m => m (S.Term, S.Term, [S.Term])
-> selfFunction = selfData isRight
->
-> elaborateInEnv :: MonadResolver m => [ResolveTerm] -> ResolveTerm -> m ([S.Term], S.Term)
-> elaborateInEnv env t = selfType >>= \mt -> inferWithin $ do
->     self <- mkMSelf mt
+> elaborateInEnv :: MonadResolver m => Maybe (S.Term, S.Term) -> [ResolveTerm] -> ResolveTerm -> m ([S.Term], S.Term)
+> elaborateInEnv mtd env t = inferWithin $ do
+>     let mtt = snd <$> mtd
+>     let mt = fst <$> mtd
+>     self <- mkMSelf mtt
 >     ienv <- mapM (instantiate self) env
 >     it <- instantiate self t
 >     infer $ foldr S.Abs it ienv
->     liftA2 (,) (mapM strip ienv) (strip it)
+>     case (mt, self) of
+>         (Just t', Just k) -> liftA2 (,) (mapM (strip . subst k t') ienv) (strip $ subst k t' it)
+>         _ -> liftA2 (,) (mapM strip ienv) (strip it)
 >
-> elaborateInd :: MonadResolver m => [ResolveTerm] -> Sort -> m [S.Term]
-> elaborateInd env s = fst <$> elaborateInEnv env (S.Sort s)
+> elaboratePlain :: MonadResolver m => ResolveTerm -> m S.Term
+> elaboratePlain t = snd <$> elaborateInEnv Nothing [] t
+>
+> elaborateInd :: MonadResolver m => [ResolveTerm] -> m [S.Term]
+> elaborateInd pis = fst <$> elaborateInEnv Nothing pis (S.Sort Prop)
 >
 > elaborateFun :: MonadResolver m => ResolveTerm -> m S.Term
-> elaborateFun bt = snd <$> (selfFunction >>= \(_, _, ps) -> elaborateInEnv (parameterizeAll ps) bt)
-> 
-> elaborateConstr :: MonadResolver m => [ResolveTerm] -> [ResolveTerm] -> m ([S.Term], [S.Term])
-> elaborateConstr env is = selfInductive >>= \(t, tt, ps) -> inferWithin $ do
->     self <- mkSelf tt
->     ienv <- mapM (instantiate $ Just self) (parameterizeAll ps ++ env)
->     iis <- mapM (instantiate $ Just self) is
->     let pas = map (S.Ref . (+length env)) $ reverse [0..length ps-1]
->     infer $ foldr S.Abs (foldl S.App (S.Param self) (pas ++ iis)) ienv
->     liftA2 (,) (mapM strip ienv) (mapM strip iis)
+> elaborateFun bt = do
+>     (cd, cf) <- selfFunction
+>     (_, ebt) <- elaborateInEnv (Just (cdFutureTerm cd, cdType cd)) (parameterizeAll $ cfParams cf) bt
+>     return ebt
 >
-> elaborate :: MonadResolver m => ResolveTerm -> m S.Term
-> elaborate t = snd <$> elaborateInEnv [] t
+> elaborateCon :: MonadResolver m => [ResolveTerm] -> [ResolveTerm] -> m ([S.Term], [S.Term])
+> elaborateCon ps is = do
+>     (cd, ci) <- selfInductive
+>     let allPs = parameterizeAll (ciParams ci) ++ ps
+>     let ret = foldl S.App (S.Param SelfRef) is
+>     (eps, eret) <- elaborateInEnv (Just (cdFutureTerm cd, cdType cd)) allPs ret
+>     -- TODO call collectApps here.
+>     return (eps, [])
 >
 > inferWithin :: MonadResolver m => InferU String a -> m a
 > inferWithin m = liftEither $ first InferError $ runInferU m 
@@ -246,7 +259,7 @@ function objects or their DeBrujin indices.
 >     do
 >         asks reCurrentDef
 >             >>= maybe (throwError InvalidFixpoint) return
->             >>= either (const $ return ()) record . cdParse
+>             >>= either (const $ return ()) (record . cfParsed) . cdExtra
 >     where
 >         record cf = do
 >             params <- take (length $ pfArity cf) <$> asks reApps
@@ -334,7 +347,7 @@ function objects or their DeBrujin indices.
 >
 > resolveFun :: MonadResolver m => ParseFun -> m Function
 > resolveFun f = do
->     fts <- resolveTerm (pfType f) >>= elaborate
+>     fts <- resolveTerm (pfType f) >>= elaboratePlain
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
 >     rec f' <- withNoDecreasing $ withFunction (S.Fun f') fts ats f $ do
 >          fb <- resolveTerm (pfBody f) >>= elaborateFun
@@ -355,15 +368,15 @@ function objects or their DeBrujin indices.
 > resolveConstr pc = do
 >     ps' <- resolveParams (pcParams pc)
 >     is' <- withVars (fst $ unzip $ pcParams pc) $ mapM resolveTerm (pcIndices pc)
->     (ps'', is'') <- elaborateConstr ps' is'
+>     (ps'', is'') <- elaborateCon ps' is'
 >     return $ Constructor ps'' is'' (pcName pc)
 >
 > resolveInd :: MonadResolver m => ParseInd -> m S.Inductive
 > resolveInd pi = do
->     its <- resolveParams (piParams pi ++ piArity pi) >>= (`elaborateInd` piSort pi)
+>     its <- resolveParams (piParams pi ++ piArity pi) >>= elaborateInd
 >     let it = foldr S.Prod (S.Sort $ piSort pi) its
 >     let (ps', is') = splitAt (length $ piParams pi) its
->     rec i' <- withInductive (S.Ind i') it ps' pi $ do
+>     rec i' <- withInductive (S.Ind i') it ps' is' pi $ do
 >          cs <- mapM resolveConstr (piConstructors pi)
 >          return $ Inductive ps' is' (piSort pi) cs (piName pi)
 >     emitInd (piName pi) i' 
