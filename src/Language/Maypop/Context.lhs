@@ -149,6 +149,7 @@ function as follows:
 >             bindTerm k1 Nothing >> merge k1 k2 >> return (Param k1)
 >         unify' (Param k1) t = bindTerm k1 (Just t) >> return t
 >         unify' t (Param k2) = bindTerm k2 (Just t) >> return t
+>         unify' _ _ = mzero
 
 The above function works pretty much as wed expect. Every time we encounter a new
 binder, we generate a unique name for it via `withBinder` (which itself calls
