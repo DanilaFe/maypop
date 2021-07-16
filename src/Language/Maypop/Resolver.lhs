@@ -28,6 +28,7 @@ function objects or their DeBrujin indices.
 > import qualified Data.Map as Map
 > import qualified Data.Set as Set
 > import Data.Char
+> import Data.Monoid
 > import Data.Bifunctor
 > import Data.List
 > import Data.Maybe
@@ -57,7 +58,7 @@ function objects or their DeBrujin indices.
 > data ResolveEnv = ResolveEnv
 >     { reVars :: [(String, VarSize)]
 >     , reHeader :: ModuleHeader
->     , reCurrentFun :: Maybe ParseFun
+>     , reCurrentDef :: Maybe (Either ParseInd ParseFun)
 >     , reApps :: [ParseTerm]
 >     }
 >
@@ -74,7 +75,10 @@ function objects or their DeBrujin indices.
 > withVars xs m = foldr withVar m xs
 >
 > withFun :: MonadReader ResolveEnv m => ParseFun -> m a -> m a
-> withFun f = local $ \re -> re { reCurrentFun = Just f }
+> withFun f = local $ \re -> re { reCurrentDef = Just (Right f) }
+>
+> withInd :: MonadReader ResolveEnv m => ParseInd -> m a -> m a
+> withInd f = local $ \re -> re { reCurrentDef = Just (Left f) }
 >
 > withApp :: MonadReader ResolveEnv m => ParseTerm -> m a -> m a
 > withApp pt = local $ \re -> re { reApps = pt : reApps re }
@@ -85,8 +89,13 @@ function objects or their DeBrujin indices.
 > currentModule :: MonadReader ResolveEnv m => m Symbol
 > currentModule = asks (mhName . reHeader)
 >
-> lookupVar :: MonadReader ResolveEnv m => String -> m (Maybe Int)
-> lookupVar s = asks (elemIndex s . map fst . reVars)
+> lookupVar :: MonadReader ResolveEnv m => String -> m (Maybe (Either () Int))
+> lookupVar s = asks (getFirst . (findSelf <> findRef) . reVars)
+>     where
+>         findRef = First . fmap Right . elemIndex s . map fst
+>         findSelf = First . (>>= intoSelf) . lookup s
+>         intoSelf Self = Just (Left ())
+>         intoSelf _ = Nothing
 >
 > varSize :: MonadReader ResolveEnv m => String -> m VarSize
 > varSize s = asks (fromMaybe Unknown . lookup s . reVars)
@@ -111,7 +120,7 @@ function objects or their DeBrujin indices.
 >         inst Placeholder = fresh
 >
 > strip :: MonadInfer k m => S.ParamTerm k -> m S.Term
-> strip t = reifyTerm t >>= traverse (const mzero)
+> strip t = reifyTerm t >>= traverse (const (throwError undefined))
 > 
 > mkSelf :: MonadInfer k m => S.Term -> m k
 > mkSelf t = do
@@ -138,7 +147,8 @@ function objects or their DeBrujin indices.
 >     self <- mkSelf t
 >     ienv <- mapM (instantiate $ Just self) env
 >     iis <- mapM (instantiate $ Just self) is
->     infer $ foldl (flip S.Abs) (foldl S.App (S.Param self) iis) ienv
+>     let test = foldr S.Abs (foldl S.App (S.Param self) iis) ienv
+>     infer $ test
 >     liftA2 (,) (mapM strip ienv) (mapM strip iis)
 >
 > elaborate :: MonadResolver m => Maybe S.Term -> ResolveTerm -> m S.Term
@@ -198,17 +208,20 @@ function objects or their DeBrujin indices.
 > smallerParams :: [Maybe (String, VarSize)] -> Set.Set String
 > smallerParams mps = Set.fromList $ catMaybes $ map (>>=(varParent . snd)) mps
 >
-> recordFixpoint :: MonadResolver m => String -> ParseFun -> m ()
-> recordFixpoint s f
->     | s /= pfName f = return ()
->     | otherwise = do
->         params <- take (length $ pfArity f) <$> asks reApps
->         smallerParams <- smallerParams <$> mapM termSize params
->         emitDecreasing smallerParams
+> recordFixpoint :: MonadResolver m => m ()
+> recordFixpoint =
+>     do
+>         asks reCurrentDef
+>             >>= maybe (throwError InvalidFixpoint) return
+>             >>= either (const $ return ()) record
+>     where
+>         record cf = do
+>             params <- take (length $ pfArity cf) <$> asks reApps
+>             smallerParams <- smallerParams <$> mapM termSize params
+>             emitDecreasing smallerParams
 > 
 > lookupUnqual :: MonadResolver m => String -> m (S.ParamTerm a)
 > lookupUnqual s = do
->     asks reCurrentFun >>= maybe (return ()) (recordFixpoint s)
 >     es <- gets (fromMaybe [] . Map.lookup (unqualName s) . sUnqualified . rsScope)
 >     exportToTerm <$> narrowExports es
 >
@@ -257,7 +270,8 @@ function objects or their DeBrujin indices.
 > resolveTerm (Ref (StrRef s)) = do
 >     vref <- lookupVar s
 >     case vref of
->         Just i -> return $ (S.Ref i)
+>         Just Left{} -> recordFixpoint >> return (S.Param SelfRef)
+>         Just (Right i) -> return $ (S.Ref i)
 >         Nothing -> lookupUnqual s
 > resolveTerm (Ref (SymRef s)) = lookupQual s
 > resolveTerm (Abs (x, tt) t) = clearApps $ liftA2 S.Abs (resolveTerm tt) (withVar x $ resolveTerm t)
@@ -289,11 +303,11 @@ function objects or their DeBrujin indices.
 > resolveFun f = do
 >     fts <- resolveTerm (pfType f) >>= elaborate Nothing
 >     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
->     rec f' <- withNoDecreasing $ withFun f $ emitFun (pfName f) f' >> do
->          (_, fb) <- withSizedVars Original (pfArity f) $ resolveTerm (pfBody f)
->              >>= elaborateInEnv (Just fts) (map parameterize ats)
+>     f' <- withNoDecreasing $ withFun f $ withSizedVar Self (pfName f) $ withSizedVars Original (pfArity f) $ do
+>          (_, fb) <- resolveTerm (pfBody f) >>= elaborateInEnv (Just fts) (map parameterize ats)
 >          dec <- findDecreasing (pfArity f)
 >          return $ Function (pfName f) ats rt fb dec
+>     emitFun (pfName f) f'
 >     return f'
 >
 > collectFunArgs :: [String] -> (S.ParamTerm a) -> Either ResolveError ([S.ParamTerm a], S.ParamTerm a)
@@ -306,7 +320,7 @@ function objects or their DeBrujin indices.
 >
 > resolveConstr :: MonadResolver m => S.Term -> [S.Term] -> ParseConstr -> m S.Constructor
 > resolveConstr it ips pc = do
->     ps' <- (++ parameterizeAll ips) <$> resolveParams (pcParams pc)
+>     ps' <- (parameterizeAll ips++) <$> resolveParams (pcParams pc)
 >     is' <- withVars (fst $ unzip $ pcParams pc) $ mapM resolveTerm (pcIndices pc)
 >     (ps'', is'') <- elaborateConstr it ps' is'
 >     return $ Constructor ps'' is'' (pcName pc)
@@ -316,9 +330,10 @@ function objects or their DeBrujin indices.
 >     its <- resolveParams (piParams pi ++ piArity pi) >>= (`elaborateInd` piSort pi)
 >     let it = foldr S.Prod (S.Sort $ piSort pi) its
 >     let (ps', is') = splitAt (length $ piParams pi) its
->     rec i' <- emitInd (piName pi) i' >> do
->          cs <- withVars (map fst $ piParams pi) $ mapM (resolveConstr it ps') (piConstructors pi)
+>     i' <- withInd pi $ withSizedVar Self (piName pi) $ withVars (map fst $ piParams pi) $ do
+>          cs <- mapM (resolveConstr it ps') (piConstructors pi)
 >          return $ Inductive ps' is' (piSort pi) cs (piName pi)
+>     emitInd (piName pi) i' 
 >     emitConstructors i'
 >     return i'
 > 
@@ -332,5 +347,5 @@ function objects or their DeBrujin indices.
 > resolveDefs :: ModuleHeader -> GlobalScope -> [(String, ParseDef)] -> Either ResolveError (Map.Map String Definition)
 > resolveDefs mh gs ps = (rsDefs . snd) <$> (runExcept $ runReaderT (runStateT (mapM (resolveDef . snd) ps) state) env)
 >     where
->         env = ResolveEnv { reVars = [], reHeader = mh, reCurrentFun = Nothing, reApps = [] }
+>         env = ResolveEnv { reVars = [], reHeader = mh, reCurrentDef = Nothing, reApps = [] }
 >         state = ResolveState { rsScope = gs, rsDefs = Map.empty, rsDecreasing = Nothing }
