@@ -199,7 +199,7 @@ all together, we handle the potential for an invalid constructor reference
 (with an invalid constructor index `ci`) using `withConstr` and `mConstr`.
 
 > infer (Constr i ci) = withConstr $
->     \c -> return $ parameterize $ foldr Prod (cReturn c) (iParams i ++ cParams c)
+>     \c -> return $ parameterize $ foldr Prod (cReturn c) (map fst $ iParams i ++ cParams c)
 >     where
 >         mConstr = nth ci $ iConstructors i
 >         withConstr f = maybe (throwError UnknownConstructor) f mConstr
@@ -211,7 +211,7 @@ Things are much simpler for an inductive data type itself; it's a type
 constructor returning its sort (`iSort i`), taking as arguments its
 parameters and indices.
 
-> infer (Ind i) = return $ parameterize $ foldr Prod (Sort $ iSort i) $ iParams i ++ iArity i
+> infer (Ind i) = return $ parameterize $ foldr Prod (Sort $ iSort i) $ map fst (iParams i) ++ iArity i
 
 Probably the most complicated case is that of a `Case` expression. In the
 code, the upser specifies the expected return type (`tt`), which may
@@ -257,7 +257,7 @@ each branch, and return the case expression's final type.
 >     let subPs off = substituteMany off (map (offsetFree off) ps)
 >     let tType = foldl App (Ind i) is
 >     let constr (ci,c) b = do
->          let cps = zipWith subPs [0..] $ parameterizeAll $ cParams c
+>          let cps = zipWith subPs [0..] $ parameterizeAll $ map fst $ cParams c
 >          let inds' = map (subPs $ length cps) $ parameterizeAll $ cIndices c
 >          let rcps = map (Ref . negate) $ [1..length cps]
 >          let expt = foldl App (Constr i ci) $ rcps
@@ -400,7 +400,7 @@ since it will verify the validity of the environment.
 
 > checkFunction :: MonadInfer Void m => Function -> m Term
 > checkFunction f = do
->     ft <- eval <$> (extendAll (fArity f) $ infer $ fBody f)
+>     ft <- eval <$> (extendAll (map fst $ fArity f) $ infer $ fBody f)
 >     let rt = eval (fType f)
 >     guardE (TypeMismatch ft rt) $ ft == rt
 >     return ft

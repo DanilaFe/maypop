@@ -94,18 +94,22 @@ list of argument terms `B1` through `Bm`), the sort that it returns (`iSort`),
 a list of its constructors (`iConstructors`) and, once again, a name (`iName`).
 
 > data Constructor = Constructor
->     { cParams :: [Term]
+>     { cParams :: [(Term, ParamType)]
 >     , cIndices :: [Term]
 >     , cName :: String
 >     }
 >
 > data Inductive = Inductive
->     { iParams :: [Term]
+>     { iParams :: [(Term, ParamType)]
 >     , iArity :: [Term]
 >     , iSort :: Sort
 >     , iConstructors :: [Constructor]
 >     , iName :: String
 >     }
+
+{{< todo >}}Explain this{{< /todo >}}
+
+> data ParamType = Inferred | Explicit deriving (Eq, Show)
 
 Equality on data types is required, but hard to provide. For now, We'll
 just compare their names.
@@ -152,7 +156,7 @@ into equivalent lambda abstractions.
 
 > data Function = Function
 >     { fName :: String
->     , fArity :: [Term]
+>     , fArity :: [(Term, ParamType)]
 >     , fType :: Term
 >     , fBody :: Term
 >     , fDec :: Maybe Int
@@ -162,7 +166,7 @@ It's always good to have in hand the _whole_ type of the function (`Args -> Retu
 This is a straightforward right-associative fold:
 
 > fFullType :: Function -> Term
-> fFullType f = foldr Prod (fType f) (fArity f)
+> fFullType f = foldr Prod (fType f) (map fst $ fArity f)
 
 One moment, though. What about the parameter names, like `n` from
 the `factorial` example above? It so happens that we will be using DeBrujin

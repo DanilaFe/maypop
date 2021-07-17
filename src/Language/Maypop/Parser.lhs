@@ -44,27 +44,51 @@ repetitive.
 >
 > data ParseConstr = ParseConstr
 >     { pcName :: String
->     , pcParams :: [ParseParam]
+>     , pcParams :: [(ParseParam, ParamType)]
 >     , pcIndices :: [ParseTerm]
 >     }
 >     deriving Show
 >
+> pcParamNames :: ParseConstr -> [String]
+> pcParamNames = map (fst . fst) . pcParams
+>
+> pcParamTypes :: ParseConstr -> [ParamType]
+> pcParamTypes = map snd . pcParams
+>
+> pcAllParams :: ParseConstr -> [ParseParam]
+> pcAllParams = map fst . pcParams
+>
 > data ParseInd = ParseInd
 >     { piName :: String
->     , piParams :: [ParseParam] 
+>     , piParams :: [(ParseParam, ParamType)] 
 >     , piArity :: [ParseParam]
 >     , piSort :: Sort
 >     , piConstructors :: [ParseConstr]
 >     }
 >     deriving Show
 >
+> piParamNames :: ParseInd -> [String]
+> piParamNames = map (fst . fst) . piParams
+>
+> piParamTypes :: ParseInd -> [ParamType]
+> piParamTypes = map snd . piParams
+>
+> piAllParams :: ParseInd -> [ParseParam]
+> piAllParams = map fst . piParams
+>
 > data ParseFun = ParseFun
 >     { pfName :: String
->     , pfArity :: [String]
+>     , pfArity :: [(String, ParamType)]
 >     , pfType :: ParseTerm
 >     , pfBody :: ParseTerm
 >     }
 >     deriving Show
+>
+> pfParamNames :: ParseFun -> [String]
+> pfParamNames = map fst . pfArity
+>
+> pfParamTypes :: ParseFun -> [ParamType]
+> pfParamTypes = map snd . pfArity
 >
 > type ParseDef = Either ParseInd ParseFun
 >
@@ -226,6 +250,9 @@ repetitive.
 > params :: Parser [ParseParam]
 > params = concat <$> many param
 >
+> explicit :: [a] -> [(a, ParamType)]
+> explicit = map (,Explicit)
+>
 > collectArity :: ParseTerm -> Parser ([ParseParam], Sort)
 > collectArity (Prod l r) = first (l:) <$> collectArity r
 > collectArity (Sort s) = return ([], s)
@@ -233,14 +260,14 @@ repetitive.
 >
 > indBranch :: String -> Parser ParseConstr
 > indBranch i = withPos $ pure ParseConstr
->     <*> ident <*> params
+>     <*> ident <*> (explicit <$> params)
 >     <* sym ":" <* sym i <*> many term'
 >
 > inductive :: Parser (String, ParseInd)
 > inductive = do
 >     kw "data"
 >     name <- ident
->     ps <- params
+>     ps <- (explicit <$> params)
 >     sym ":"
 >     (ar, s) <- term >>= collectArity
 >     kw "where"
@@ -256,7 +283,7 @@ repetitive.
 >    ps <- many ident
 >    sym "="
 >    bt <- term
->    return $ (name, ParseFun name ps t bt)
+>    return $ (name, ParseFun name (explicit ps) t bt)
 >
 > definition :: Parser (String, ParseDef)
 > definition = (second Left <$> inductive) <|> (second Right <$> function)

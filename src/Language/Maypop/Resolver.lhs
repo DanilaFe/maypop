@@ -98,13 +98,13 @@ function objects or their DeBrujin indices.
 > withFun t tt ps f = local $ \re -> re { reCurrentDef = Just (CurrentDef t tt $ Right $ CurrentFun ps f) }
 >
 > withFunction :: MonadReader ResolveEnv m => S.Term -> S.Term -> [S.Term] -> ParseFun -> m a -> m a
-> withFunction t tt ps f = withFun t tt ps f . withSizedVar Self (pfName f) . withSizedVars Original (pfArity f)
+> withFunction t tt ps f = withFun t tt ps f . withSizedVar Self (pfName f) . withSizedVars Original (pfParamNames f)
 >
 > withInd :: MonadReader ResolveEnv m => S.Term -> S.Term -> [S.Term] -> [S.Term] -> ParseInd -> m a -> m a
 > withInd t tt ps is i = local $ \re -> re { reCurrentDef = Just (CurrentDef t tt $ Left $ CurrentInd ps is i) }
 >
 > withInductive :: MonadReader ResolveEnv m => S.Term -> S.Term -> [S.Term] -> [S.Term] -> ParseInd -> m a -> m a
-> withInductive t tt ps is pi = withInd t tt ps is pi . withSizedVar Self (piName pi) . withVars (map fst $ piParams pi)
+> withInductive t tt ps is pi = withInd t tt ps is pi . withSizedVar Self (piName pi) . withVars (piParamNames pi)
 >
 > withApp :: MonadReader ResolveEnv m => ParseTerm -> m a -> m a
 > withApp pt = local $ \re -> re { reApps = pt : reApps re }
@@ -368,11 +368,11 @@ function objects or their DeBrujin indices.
 > resolveFun :: MonadResolver m => ParseFun -> m Function
 > resolveFun f = do
 >     fts <- resolveTerm (pfType f) >>= elaboratePlain
->     (ats, rt) <- liftEither $ collectFunArgs (pfArity f) fts
+>     (ats, rt) <- liftEither $ collectFunArgs (pfParamNames f) fts
 >     rec f' <- withNoDecreasing $ withFunction (S.Fun f') fts ats f $ do
 >          fb <- resolveTerm (pfBody f) >>= elaborateFun
->          dec <- findDecreasing (pfArity f)
->          return $ Function (pfName f) ats rt fb dec
+>          dec <- findDecreasing (pfParamNames f)
+>          return $ Function (pfName f) (zip ats (pfParamTypes f)) rt fb dec
 >     emitFun (pfName f) f'
 >     return f'
 >
@@ -386,19 +386,19 @@ function objects or their DeBrujin indices.
 >
 > resolveConstr :: MonadResolver m => ParseConstr -> m S.Constructor
 > resolveConstr pc = do
->     ps' <- resolveParams (pcParams pc)
->     is' <- withVars (fst $ unzip $ pcParams pc) $ mapM resolveTerm (pcIndices pc)
+>     ps' <- resolveParams (pcAllParams pc)
+>     is' <- withVars (pcParamNames pc) $ mapM resolveTerm (pcIndices pc)
 >     (ps'', is'') <- elaborateCon ps' is'
->     return $ Constructor ps'' is'' (pcName pc)
+>     return $ Constructor (zip ps'' (pcParamTypes pc)) is'' (pcName pc)
 >
 > resolveInd :: MonadResolver m => ParseInd -> m S.Inductive
 > resolveInd pi = do
->     its <- resolveParams (piParams pi ++ piArity pi) >>= elaborateInd
+>     its <- resolveParams (piAllParams pi ++ piArity pi) >>= elaborateInd
 >     let it = foldr S.Prod (S.Sort $ piSort pi) its
 >     let (ps', is') = splitAt (length $ piParams pi) its
 >     rec i' <- withInductive (S.Ind i') it ps' is' pi $ do
 >          cs <- mapM resolveConstr (piConstructors pi)
->          return $ Inductive ps' is' (piSort pi) cs (piName pi)
+>          return $ Inductive (zip ps' (piParamTypes pi)) is' (piSort pi) cs (piName pi)
 >     emitInd (piName pi) i' 
 >     emitConstructors i'
 >     return i'
