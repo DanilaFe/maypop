@@ -34,6 +34,7 @@ function objects or their DeBrujin indices.
 > import Data.Maybe
 > import Data.Functor.Identity
 > import Data.Either
+> import Debug.Trace
 >
 > data ResolveError
 >     = UnknownReference
@@ -44,6 +45,7 @@ function objects or their DeBrujin indices.
 >     | ImportError ImportError
 >     | InferError TypeError
 >     | InvalidFixpoint
+>     | InvalidResolve
 >     deriving Show
 >
 > data VarSize = Self | Original | SmallerThan String | Unknown deriving Show
@@ -146,8 +148,16 @@ function objects or their DeBrujin indices.
 > strip :: MonadInfer k m => S.ParamTerm k -> m S.Term
 > strip = traverse (const (throwError undefined))
 >
-> subst :: k -> S.Term -> S.ParamTerm k -> S.ParamTerm k
-> subst = undefined
+> subst :: Eq k => k -> S.Term -> S.ParamTerm k -> S.ParamTerm k
+> subst k t = subst'
+>     where
+>         subst' (S.Param k') | k == k' = parameterize t
+>         subst' (S.Abs l r) = S.Abs (subst' l) (subst' r)
+>         subst' (S.App l r) = S.App (subst' l) (subst' r)
+>         subst' (S.Let l r) = S.Let (subst' l) (subst' r)
+>         subst' (S.Prod l r) = S.Prod (subst' l) (subst' r)
+>         subst' (S.Case t i tt ts) = S.Case (subst' t) i (subst' tt) (map subst' ts)
+>         subst' t = t
 > 
 > mkSelf :: MonadInfer k m => S.Term -> m k
 > mkSelf t = do
@@ -162,10 +172,18 @@ function objects or their DeBrujin indices.
 > selfType = asks (fmap cdType . reCurrentDef)
 >
 > selfInductive :: MonadResolver m => m (CurrentDef, CurrentInd)
-> selfInductive = undefined
+> selfInductive = do
+>     mcd <- asks reCurrentDef
+>     case mcd of
+>         Just cd@CurrentDef{cdExtra=Left ci} -> return (cd, ci)
+>         _ -> throwError InvalidResolve
 >
 > selfFunction :: MonadResolver m => m (CurrentDef, CurrentFun)
-> selfFunction = undefined
+> selfFunction = do
+>     mcd <- asks reCurrentDef
+>     case mcd of
+>         Just cd@CurrentDef{cdExtra=Right cf} -> return (cd, cf)
+>         _ -> throwError InvalidResolve
 >
 > elaborateInEnv :: MonadResolver m => Maybe (S.Term, S.Term) -> [ResolveTerm] -> ResolveTerm -> m ([S.Term], S.Term)
 > elaborateInEnv mtd env t = inferWithin $ do
@@ -194,11 +212,13 @@ function objects or their DeBrujin indices.
 > elaborateCon :: MonadResolver m => [ResolveTerm] -> [ResolveTerm] -> m ([S.Term], [S.Term])
 > elaborateCon ps is = do
 >     (cd, ci) <- selfInductive
->     let allPs = parameterizeAll (ciParams ci) ++ ps
->     let ret = foldl S.App (S.Param SelfRef) is
+>     let ips = ciParams ci
+>     let allPs = parameterizeAll ips ++ ps
+>     let paramRefs = map (S.Ref . (+ length ps)) $ reverse [0..length ips -1]
+>     let ret = foldl S.App (S.Param SelfRef) (paramRefs ++ is)
 >     (eps, eret) <- elaborateInEnv (Just (cdFutureTerm cd, cdType cd)) allPs ret
->     -- TODO call collectApps here.
->     return (eps, [])
+>     (_, eretas) <- liftEither $ first (const InvalidResolve) $ collectApps eret
+>     return (drop (length ips) eps, drop (length ips) eretas)
 >
 > inferWithin :: MonadResolver m => InferU String a -> m a
 > inferWithin m = liftEither $ first InferError $ runInferU m 
