@@ -146,7 +146,7 @@ function objects or their DeBrujin indices.
 >         inst Placeholder = fresh
 >
 > strip :: MonadInfer k m => S.ParamTerm k -> m S.Term
-> strip = traverse (const (throwError undefined))
+> strip t = reifyTerm t >>= traverse (const (throwError undefined))
 >
 > subst :: Eq k => k -> S.Term -> S.ParamTerm k -> S.ParamTerm k
 > subst k t = subst'
@@ -265,7 +265,7 @@ function objects or their DeBrujin indices.
 >
 > exportToTerm :: Export -> ResolveTerm
 > exportToTerm e = case eVariant e of
->     FunExport f -> S.Fun f
+>     FunExport f -> insertLeading (map snd $ fArity f) (S.Fun f)
 >     ConExport i ci -> S.Constr i ci
 >     IndExport i -> S.Ind i
 > 

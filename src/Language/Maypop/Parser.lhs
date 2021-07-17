@@ -274,16 +274,19 @@ repetitive.
 >     cs <- blk (indBranch name)
 >     return $ (name, ParseInd name ps ar s cs)
 >
+> funParam :: Parser (String, ParamType)
+> funParam = ((,Inferred) <$> braces genParser ident) <|> ((,Explicit) <$> ident)
+>
 > function :: Parser (String, ParseFun)
 > function = do
 >    name <- ident
 >    sym ":"
 >    t <- term
 >    sym name
->    ps <- many ident
+>    ps <- many funParam
 >    sym "="
 >    bt <- term
->    return $ (name, ParseFun name (explicit ps) t bt)
+>    return $ (name, ParseFun name ps t bt)
 >
 > definition :: Parser (String, ParseDef)
 > definition = (second Left <$> inductive) <|> (second Right <$> function)
