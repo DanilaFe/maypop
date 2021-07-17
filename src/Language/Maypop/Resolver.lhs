@@ -260,7 +260,10 @@ function objects or their DeBrujin indices.
 > emitConstructors i = zipWithM_ emitConstructor [0..] (iConstructors i)
 >     where emitConstructor ci c = emitExport (cName c) (ConExport i ci)
 >
-> exportToTerm :: Export -> S.ParamTerm a
+> insertLeading :: [ParamType] -> ResolveTerm -> ResolveTerm
+> insertLeading ps t = foldl S.App t $ replicate (length $ takeWhile (==Inferred) ps) (S.Param Placeholder)
+>
+> exportToTerm :: Export -> ResolveTerm
 > exportToTerm e = case eVariant e of
 >     FunExport f -> S.Fun f
 >     ConExport i ci -> S.Constr i ci
@@ -286,17 +289,17 @@ function objects or their DeBrujin indices.
 >             smallerParams <- smallerParams <$> mapM termSize params
 >             emitDecreasing smallerParams
 > 
-> lookupUnqual :: MonadResolver m => String -> m (S.ParamTerm a)
+> lookupUnqual :: MonadResolver m => String -> m ResolveTerm
 > lookupUnqual s = do
 >     es <- gets (fromMaybe [] . Map.lookup (unqualName s) . sUnqualified . rsScope)
 >     exportToTerm <$> narrowExports es
 >
-> lookupQual :: MonadResolver m => Symbol -> m (S.ParamTerm a)
+> lookupQual :: MonadResolver m => Symbol -> m ResolveTerm
 > lookupQual s = do
 >     me <- gets (Map.lookup s . sQualified . rsScope)
 >     maybe (throwError UnknownReference) (return . exportToTerm) me
 >
-> lookupRef :: MonadResolver m => ParseRef -> m (S.ParamTerm a)
+> lookupRef :: MonadResolver m => ParseRef -> m ResolveTerm
 > lookupRef (SymRef s) = lookupQual s
 > lookupRef (StrRef s) = lookupUnqual s
 >
