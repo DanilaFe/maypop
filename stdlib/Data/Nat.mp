@@ -1,5 +1,5 @@
 module Data.Nat
-import Logic (Eq(..), cong, replace, sym)
+import Logic (Eq(..), Or(..), cong, replace, sym)
 
 data Nat : Type 0 where
     O : Nat
