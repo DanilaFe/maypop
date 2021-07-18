@@ -34,7 +34,6 @@ function objects or their DeBrujin indices.
 > import Data.Maybe
 > import Data.Functor.Identity
 > import Data.Either
-> import Debug.Trace
 >
 > data ResolveError
 >     = UnknownReference
@@ -145,8 +144,8 @@ function objects or their DeBrujin indices.
 >         inst SelfRef = self
 >         inst Placeholder = fresh
 >
-> strip :: MonadInfer k m => S.ParamTerm k -> m S.Term
-> strip t = reifyTerm t >>= traverse (const (throwError undefined))
+> strip :: MonadInfer k m => Int -> S.ParamTerm k -> m S.Term
+> strip i t = reifyTermOffset i t >>= traverse (const (throwError undefined))
 >
 > subst :: Eq k => k -> S.Term -> S.ParamTerm k -> S.ParamTerm k
 > subst k t = subst'
@@ -193,9 +192,11 @@ function objects or their DeBrujin indices.
 >     ienv <- mapM (instantiate self) env
 >     it <- instantiate self t
 >     infer $ foldr S.Abs it ienv
+>     let stripBody = strip (length env) 
+>     let stripEnv = zipWithM strip [0..]
 >     case (mt, self) of
->         (Just t', Just k) -> liftA2 (,) (mapM (strip . subst k t') ienv) (strip $ subst k t' it)
->         _ -> liftA2 (,) (mapM strip ienv) (strip it)
+>         (Just t', Just k) -> liftA2 (,) (stripEnv $ map (subst k t') ienv) (stripBody $ subst k t' it)
+>         _ -> liftA2 (,) (stripEnv ienv) (stripBody it)
 >
 > elaboratePlain :: MonadResolver m => ResolveTerm -> m S.Term
 > elaboratePlain t = snd <$> elaborateInEnv Nothing [] t
@@ -335,11 +336,21 @@ function objects or their DeBrujin indices.
 >         Just (_, vs) -> vs
 >         _ -> Unknown
 >
+> currentParamTypes :: MonadResolver m => m (Maybe [ParamType])
+> currentParamTypes = do
+>     mcd <- asks reCurrentDef
+>     return $ case cdExtra <$> mcd of
+>         Just (Right cf) -> Just $ pfParamTypes $ cfParsed cf
+>         Just Left{} -> Nothing
+>
 > resolveTerm :: MonadResolver m => ParseTerm -> m ResolveTerm
 > resolveTerm (Ref (StrRef s)) = do
 >     vref <- lookupVar s
 >     case vref of
->         Just Left{} -> recordFixpoint >> return (S.Param SelfRef)
+>         Just Left{} -> do
+>             recordFixpoint
+>             pts <- currentParamTypes
+>             return $ insertLeading (fromMaybe [] pts) (S.Param SelfRef)
 >         Just (Right i) -> return $ (S.Ref i)
 >         Nothing -> lookupUnqual s
 > resolveTerm (Ref (SymRef s)) = lookupQual s

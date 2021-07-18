@@ -80,6 +80,9 @@ of parameters that our terms are parameterized by.
 > reifyTerm t = do 
 >     bs <- asks (map fst)
 >     ctxValue <$> reify (Context bs Nothing (Just t)) >>= maybe mzero return
+>
+> reifyTermOffset :: MonadInfer k m => Int -> ParamTerm k -> m (ParamTerm k)
+> reifyTermOffset i = extendAll (replicate i (Sort Prop)) . reifyTerm
 
 Finally, on to the type inference function. We use the `MonadReader`
 typeclass to require read-only access to the local environment \\(\\Gamma\\).
