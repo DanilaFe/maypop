@@ -140,7 +140,7 @@ and the whole expression to \\(\\lambda.\\lambda.1\\). We thus keep
 a stack of names associated with binders; when a name is on the top
 of a stack, it was introduced last, and thus should be translated
 to index \\(0\\); the second name from the top was introduced second-to-last,
-and should thus be translated to index \\(1\\).
+and should thus be translated to index \\(1\\). We name his stack `reVars`.
 
 Another "dynamic" piece of data is `reApps`. Whereas `reVars` effectively
 tracks the __binders__ around the current term, `reApps` tracks the
@@ -255,12 +255,23 @@ features are rather complicated.
 
 With modification out of the way, we're left with retrieval. Our first
 function of this kind is `currentModule`, which retrieves the current module's
-name, in the form of a `Symbol`.
+name, in the form of a `Symbol`. This helps us when we want to add a definition
+we just resolved to the environment for other definitions to use. Since we have the `reHeader`
+field in the `ResolveEnv`, all we need to do is retrieve the header's name:
 
 > currentModule :: MonadReader ResolveEnv m => m Symbol
 > currentModule = asks (mhName . reHeader)
->
->
+
+A bit more involved is looking up a variable in our stack of binders. This is because
+we want to distinguish an important case from all others: a recursive self-reference.
+To make this distinction, we first try to see if the variable we are looking up
+has size `Self`; if it is, we return `Left ()`, which we take to mean "recursive reference".
+If the variable we find does not have size `Self`, we instead fall back to finding
+the variable's index in the stack using `elemIndex`, and wrapping it in `Right`.
+To implement the "try one, then the other" behavior, we wrap the results of our
+`findRef` and `findSelf` functions (both of which initially `Maybe`s) in a `First`,
+which is simply a `newtype` over `Maybe` that captures this behavior in its `Monoid` instance.
+
 > lookupVar :: MonadReader ResolveEnv m => String -> m (Maybe (Either () Int))
 > lookupVar s = asks (getFirst . (findSelf <> findRef) . reVars)
 >     where
@@ -268,32 +279,58 @@ name, in the form of a `Symbol`.
 >         findSelf = First . (>>= intoSelf) . lookup s
 >         intoSelf Self = Just (Left ())
 >         intoSelf _ = Nothing
->
+
+Other than looking up a variable's DeBrujin index, we may also want to know its
+size. This is handled by the below `varSize` function.
+
 > varSize :: MonadReader ResolveEnv m => String -> m VarSize
 > varSize s = asks (fromMaybe Unknown . lookup s . reVars)
->
-> data ResolveState = ResolveState
->     { rsScope :: GlobalScope
->     , rsDefs :: Map.Map String Definition
->     , rsDecreasing :: Maybe (Set.Set String)
->     }
->
-> class (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ResolveError m, MonadFix m)
->     => MonadResolver m where
->
-> instance (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ResolveError m, MonadFix m)
->     => MonadResolver m where
->
+
+Now, we get to a pretty interesting part of this module: our implementation
+of simple type inference. We have already seen the definition of `ResolveTerm`,
+a parameterization of `Term` that also includes special indicators of "holes",
+like the `_` in `id _ 0`. While resolution initially produces these `ResolveTerm`
+instances, this is not enough to perform type inference. What we're missing is
+a way to "fill" particular holes: each occurence of `Placeholder` in `ResolveTerm`
+is indistinguishable from every other such occurence. To remedy this, we assume
+that we have access to a unification context, and, also assuming that each `Placeholder` is
+different, replace each instance with a fresh unification variable. What remains is to handle
+the case for `SelfRef`. In this situation, we assume that we have already picked some
+concrete unification variable to stand for the self reference, and replace all instances
+of `SelfRef` with that variable. Of course, it may happen that we don't allow a `SelfReference`
+in a particular term. In this case, our unification variable is `Nothing`, and encountering
+`SelfRef` results in failure via `mzero`.
+
 > instantiate :: MonadInfer k m => Maybe k -> ResolveTerm -> m (S.ParamTerm k)
 > instantiate mt = traverse inst
 >     where
 >         self = maybe mzero return mt
 >         inst SelfRef = self
 >         inst Placeholder = fresh
->
+
+Once we're done performing type inference on our instantiated terms, we must ensure
+that there are no unification variables in our expression that are not bound to something:
+this would mean that we weren't able to infer parts of the expression, and it is thus invalid.
+We define a function `strip` to turn any occurence of `SelfRef` or `Placeholder` (i.e.,
+anything in a `Param` constructor) into an error.
+
+{{< todo >}}
+Reify with offset? Explain why.
+{{< /todo >}}
+
 > strip :: MonadInfer k m => Int -> S.ParamTerm k -> m S.Term
-> strip i t = reifyTermOffset i t >>= traverse (const (throwError undefined))
->
+> strip i t = reifyTermOffset i t >>= traverse (const mzero)
+
+Most unification variables end up substituted for actual expressions in
+the process of reification, captured above by `reifyTermOffset`. However,
+we can't use this mechanism for self-references, because doing so causes
+time traveling errors of the kind mentioned above. Thus, we define a function
+to simply susbtitute a particular term for a particular key.
+
+{{< todo >}}
+Verify again that we can't use reification.
+{{< /todo >}}
+
 > subst :: Eq k => k -> S.Term -> S.ParamTerm k -> S.ParamTerm k
 > subst k t = subst'
 >     where
@@ -304,33 +341,96 @@ name, in the form of a `Symbol`.
 >         subst' (S.Prod l r) = S.Prod (subst' l) (subst' r)
 >         subst' (S.Case t i tt ts) = S.Case (subst' t) i (subst' tt) (map subst' ts)
 >         subst' t = t
-> 
+
+Our above `instantiate` function requires a unificaton variable given to
+it as argument if our expression can contain references to its own definition.
+We need a function to create such a variable, which we'll call `mkSelf`. This
+function explicitly specifies that our self reference is valid in the empty context
+(global definitions aside), binds to it some type (represented as a non-parameterized
+`S.Term`), but leaves its value unknown.
+
 > mkSelf :: MonadInfer k m => S.Term -> m k
 > mkSelf t = do
 >     k <- fresh
 >     bind k (Context [] (Just $ parameterize t) Nothing)
 >     return k
->
+
+We wrap `mkSelf` by another function, `mkMSelf`, which handles the
+case in which we don't, after all, need a self reference.
+
 > mkMSelf :: MonadInfer k m => Maybe S.Term -> m (Maybe k) 
 > mkMSelf = traverse mkSelf
+
+Expression resolution is, unfortunately, not strictly environment-based; there's
+a component of mutable state to it. For instance, each time we encounter a recursive
+call, we want to augment our state, recording all the decreasing arguments (in fact,
+we perform an intersection on the sets of decreasing arguments, thus making our state
+contain only valid canidates for "decreasing argument"). We also keep track of the definitions
+that were introduced while resolving the current module (so that we can eventually bundle them
+into a new module record), and the current scope, which contains definitions imported from
+other modules, as well as ones introduced in the current module.
+
+> data ResolveState = ResolveState
+>     { rsScope :: GlobalScope
+>     , rsDefs :: Map.Map String Definition
+>     , rsDecreasing :: Maybe (Set.Set String)
+>     }
+
+Resolution occurs within a `Monad`, one that contains our environment (`MonadReader ResolveEnv`) as
+well as the current state (`MonadState ResolveState`), and supports failing (`MonadError ResolveError`).
+In addition to these rather unsurprising constraints, we also have a newcomer: `MonadFix`. `MonaFix`
+denotes the class of monads that can be used for time traveling, that is, monads that can hold references
+to the future results of their computation. We combine these into a single alias, `MonadResolver`.
+
+> class (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ResolveError m, MonadFix m)
+>     => MonadResolver m where
 >
-> selfType :: MonadResolver m => m (Maybe S.Term)
-> selfType = asks (fmap cdType . reCurrentDef)
->
+> instance (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ResolveError m, MonadFix m)
+>     => MonadResolver m where
+
+Next, we'll write some code to perform type inference (including instantiation, type checking, and stripping of
+terms) in the monadic context with `MonadResolver`. The first thing we can get started on is retriving
+the current definition, be it an inductive data type or a function, which will eventually be used for
+`mkMSelf`, as well as for getting a handle on the `futureTerm`. First up is `selfInductive`, which
+requires that our current definition is set to something, and that this something is an inductive data type.
+
 > selfInductive :: MonadResolver m => m (CurrentDef, CurrentInd)
 > selfInductive = do
 >     mcd <- asks reCurrentDef
 >     case mcd of
 >         Just cd@CurrentDef{cdExtra=Left ci} -> return (cd, ci)
 >         _ -> throwError InvalidResolve
->
+
+Symmetrically, we define `selfFunction`, which requires that our current definition is set to something,
+and that _this_ something is a function definition.
+
 > selfFunction :: MonadResolver m => m (CurrentDef, CurrentFun)
 > selfFunction = do
 >     mcd <- asks reCurrentDef
 >     case mcd of
 >         Just cd@CurrentDef{cdExtra=Right cf} -> return (cd, cf)
 >         _ -> throwError InvalidResolve
->
+
+Next, we arrive at the driving function of the elaboration code. Elaboration is the process
+of convering an expression with placeholders (`ResolveTerm`) into an expression without placeholders
+(`S.Term`) by filling in the holes created by the placeholders. Importantly, we may be elaborating an expression
+within a non-empty environment (for instance, we may be elaborating a function's body, which requires access
+to the function's arguments for typechecking to work). For this reason, we call our driving function `elaborateInEnv`.
+
+Besides the environment and the term being resolved (both of which are actually accepted as `ResolveTerm`s, for
+reasons that will become clear shortly), this function also accepts a `Maybe (S.Term, S.Term)`. This argument, like
+many of the `Maybe`s we've encountered so far in this module, represents the current defintion (with `Nothing`
+meaning that the current definition is not available within the expression being elaborated). Unlike the
+`Maybe S.Term` in `mkMSelf`, though, this argument also contains a reference to the future term, which
+is eventually substituted into the resolved expression.
+
+As we have observed above, an expression may be elaborated within a particular context. Rather than manually
+keeping track of this context everywhere in our `MonadResolver` code so that we may eventually feed it to
+`infer`, we opt for a simpler approach: when typechecking an expression \\(e\\) within an environment
+\\(x_1:\\tau_1, \\ldots, x_n:\\tau_n\\), we convert it into an expression \\(\\lambda (x_1:\\tau_1).\\ldots\\lambda (x_n:\\tau_n). e\\),
+and perform typechecking in an empty environment. That way, `infer` handles extending the environment (also
+ensuring the environment's validity as usual), sparing us the otherwise necessary duplication of code.
+
 > elaborateInEnv :: MonadResolver m => Maybe (S.Term, S.Term) -> [ResolveTerm] -> ResolveTerm -> m ([S.Term], S.Term)
 > elaborateInEnv mtd env t = inferWithin $ do
 >     let mtt = snd <$> mtd
@@ -344,13 +444,35 @@ name, in the form of a `Symbol`.
 >     case (mt, self) of
 >         (Just t', Just k) -> liftA2 (,) (stripEnv $ map (subst k t') ienv) (stripBody $ subst k t' it)
 >         _ -> liftA2 (,) (stripEnv ienv) (stripBody it)
->
+
+The rest of the elaboration functions use `elaborateInEnv` in a variety of ways. The simplest
+case is elaborating something like the type of a function, which cannot have a recursive referene
+to the function itself, and which does not occur inside any environment. We call this case
+`elaboratePlain`.
+
 > elaboratePlain :: MonadResolver m => ResolveTerm -> m S.Term
 > elaboratePlain t = snd <$> elaborateInEnv Nothing [] t
->
+
+A more interesting case is the elaboration of the parameters and indices
+of an inductive data type. This is where having our environment as a list of `ResolveTerm`s
+comes in handy: we make a call to `elaborateInEnv` and simply ask it to resolve the expresion
+`S.Sort Prop` (which clearly does not need to be resolved, since it has no placeholders and no
+self-references). By doing so with an environment made up of parameters an indices, though, we
+wrangle `infer` into typechecking each parameter and index in turn, each time extending the environment
+with the resulting type so that the subsequent parameters and indics (which, in the general
+case, can depend on it) also typecheck correctly. Of course, we don't care for the result
+of elaborating `S.Sort Prop`; we merely throw it away, and return only the elaborated parameters
+and indices.
+
 > elaborateInd :: MonadResolver m => [ResolveTerm] -> m [S.Term]
 > elaborateInd pis = fst <$> elaborateInEnv Nothing pis (S.Sort Prop)
->
+
+When elaborating a function, we make use of `selfFunction` to require that we are,
+indeed, within a function, and to retrieve the function's type and a reference
+to the function's future term (`cdType cd` and `cdFutureTerm`, respectively).
+We then elaborate the function's body, extending the environment with the types of
+the function's arguments, as explained above.
+
 > elaborateFun :: MonadResolver m => ResolveTerm -> m S.Term
 > elaborateFun bt = do
 >     (cd, cf) <- selfFunction
