@@ -37,7 +37,7 @@ function objects or their DeBrujin indices.
 
 Turning parsed expressions into their `Term` coutnerparts
 can go wrong in many different ways. We first define a data
-type to represent all the possible errors. Not in particular
+type to represent all the possible errors. Note in particular
 the `InferError` constructor, which wraps a `TypeError`. Filling
 in implicit arguments is based on types; we thus have to perform
 type inference, which can itself yield a variety of errors.
@@ -56,13 +56,28 @@ type inference, which can itself yield a variety of errors.
 
 An important concept in the Calculus of Inductive Constructions
 is the notion of fixpoints. These are functions bundled with their
-"decreasing" argument; we will need to track the "sizes" of the various
-parameters to function calls so that we can determine the decreasing
-argument, if any. We also use the `Self` size to avoid having to insert
+"decreasing" argument, which are used for recursion. There are restrictions
+on how these functions are evaluated, which helps prevent unwanted infinite
+substitutions. To construct these fixpoints, we will need to track the "sizes" of the various
+arguments to function calls so that we can determine the decreasing
+argument, if any. For instance, a definition like `f x = f x` will not
+be valid, since none of the parameters to the recursive call to `f` are
+"smaller" than the original parameters (in fact, they're the same size!). On the
+other hand, something like `f (x:xs) = f xs` would be okay, since `xs` is a part
+of the original list, and thus smaller. By forcing a function to have
+a decreasing argument, we effectively force it to terminate: the argument keeps
+getting smaller, and will eventually exhaust itself.
+
+To track the sizes of various references, we will bundle a new data type, `VarSize`,
+with variables we encounter. In addition to `Original` (the size of a parameter itself)
+and `SmallerThan x` (the size of a variable that's smaller than input parameter `x`),
+we also use the `Self` size to indicate recursion (in our above examples, `f` would
+have size `Original`). This third size will help absolve us of the need to insert
 `Fun` or `Ind` constructors referring to the current definition (for instance,
 in recursive functions). That's not to say that inserting such recursive references
 is impossible: recursive functions are invariably represented by cyclic data structures
-in our representation. However, it's not immediately useful; more on that later.
+in our encoding of the language. However, creating such cyclic data structures
+right off the bat is more complicated and not particularly worth it.
 
 > data VarSize = Self | Original | SmallerThan String | Unknown deriving Show
 
@@ -79,7 +94,9 @@ the parsed expression `id O` will first be translated to `id _ O` (inserting
 a placeholder for the type we need to infer), and then be elaborated into
 `id Nat O` after a round of type checking. To represent expressions
 such as `id _ O`, we define a data type `ResolveParam`, which is used
-to parameterize `ParamTerm`.
+to parameterize `ParamTerm`. This data type also has an extra
+constructor, `SelfRef`, which will be used as a stand-in for a recursive
+function call or self-reference.
 
 > data ResolveParam = SelfRef | Placeholder deriving (Eq, Show)
 > type ResolveTerm = S.ParamTerm ResolveParam
@@ -113,7 +130,7 @@ for this page, but check out [Csongor Kiss'](https://blog.csongor.co.uk/time-tra
 on the technique that allows this (time traveling!), and maybe also [this article of mine](https://danilafe.com/blog/haskell_lazy_evaluation/).
 
 The main thing to know about handling such future values is that __we cannot make decisions based on them__.
-This is because intuitively, we cannot base our decision based on its future outcone.
+This is because intuitively, we cannot base our decision on its future outcone.
 If this is too philosophical, you can think about what happens under the hood: our future
 value is not actually a value, but a [thunk](https://wiki.haskell.org/Thunk). When time traveling, this thunk
 contains a reference to itself. Then, To make a decision based on our future term,
@@ -149,13 +166,13 @@ __applications__. Thus, in the expression \\(f\\ x\\ y\\), when we translate
 to track decreasing arguments to functions: when we encounter a recursive
 call, we check what arguments it's applied to, and record which, if any, are
 smaller versions of the original arguments. Then, at the end, if we find
-that one argument always receives a "smaller" argument, we know we're safe:
+that one argument always receives a "smaller" value, we know we're safe:
 our function will eventually terminate. If, on the other hand, no argument
 is consistently smaller, we will give up and report `InvalidFixpoint`.
 
 The remaining two fields of our environment are `reHeader` (currently
 only used to retrieve the current module name) and `reCurrentDef`,
-the current definition data sturcutre we've define above.
+the current definition data sturcutre we've defined above.
 
 > data ResolveEnv = ResolveEnv
 >     { reVars :: [(String, VarSize)]
@@ -175,13 +192,13 @@ whether it's smaller, a recursive reference, or unknown.
 > withSizedVar vs s = local (\re -> re { reVars = (s,vs) : reVars re })
 
 As a shortcut for the case when we are introducing a variable with no known
-size information, we define `sizeVar` as follows:
+size information, we define `withVar` as follows:
 
 > withVar :: MonadReader ResolveEnv m => String -> m a -> m a
 > withVar = withSizedVar Unknown
 
 Sometimes we need to introduce more than a single variable in the environment
-at the same time (for instance, in case expression branches). We thus
+at the same time (when processing case expression branches, for instance). We thus
 define a helper function `withSizedVars`, that simply repeats `withSizedVar`
 for each variable in its input.
 
@@ -213,7 +230,7 @@ recursion). We combine all of these operations into `withFunction`.
 > withFunction :: MonadReader ResolveEnv m => S.Term -> S.Term -> [S.Term] -> ParseFun -> m a -> m a
 > withFunction t tt ps f = withFun t tt ps f . withSizedVar Self (pfName f) . withSizedVars Original (pfParamNames f)
 
-Similarly, the `withInd` function accepts, in addition to the term and its type, the list
+Similarly to `withFun`, the `withInd` function accepts, in addition to the term and its type, the list
 of the inductive definition's parameters, index types, and the raw version of the inductive
 definition received from the parser.
 
@@ -221,8 +238,8 @@ definition received from the parser.
 > withInd t tt ps is i = local $ \re -> re { reCurrentDef = Just (CurrentDef t tt $ Left $ CurrentInd ps is i) }
 
 Just as with `withFunction`, we define a `withInductive` function that not only sets the current
-definition to an inductive data type, but also introduces its parametersm along with a reference
-to the data type itself, into the environment. This time we don't bother tagging the parameters
+definition to an inductive data type, but also introduces its parameters -- along with a reference
+to the data type itself -- into the environment. This time we don't bother tagging the parameters
 as `Original`, since we need not detect recursion for data types.
 
 > withInductive :: MonadReader ResolveEnv m => S.Term -> S.Term -> [S.Term] -> [S.Term] -> ParseInd -> m a -> m a
@@ -269,7 +286,7 @@ has size `Self`; if it is, we return `Left ()`, which we take to mean "recursive
 If the variable we find does not have size `Self`, we instead fall back to finding
 the variable's index in the stack using `elemIndex`, and wrapping it in `Right`.
 To implement the "try one, then the other" behavior, we wrap the results of our
-`findRef` and `findSelf` functions (both of which initially `Maybe`s) in a `First`,
+`findRef` and `findSelf` functions (both of which are initially `Maybe`s) in a `First`,
 which is simply a `newtype` over `Maybe` that captures this behavior in its `Monoid` instance.
 
 > lookupVar :: MonadReader ResolveEnv m => String -> m (Maybe (Either () Int))
@@ -345,9 +362,9 @@ Verify again that we can't use reification.
 Our above `instantiate` function requires a unificaton variable given to
 it as argument if our expression can contain references to its own definition.
 We need a function to create such a variable, which we'll call `mkSelf`. This
-function explicitly specifies that our self reference is valid in the empty context
-(global definitions aside), binds to it some type (represented as a non-parameterized
-`S.Term`), but leaves its value unknown.
+function explicitly specifies that our self-reference is valid in the empty context
+(global definitions aside), unifies its type with a non-parameterized
+`S.Term`, but leaves its value unknown.
 
 > mkSelf :: MonadInfer k m => S.Term -> m k
 > mkSelf t = do
@@ -378,7 +395,7 @@ other modules, as well as ones introduced in the current module.
 
 Resolution occurs within a `Monad`, one that contains our environment (`MonadReader ResolveEnv`) as
 well as the current state (`MonadState ResolveState`), and supports failing (`MonadError ResolveError`).
-In addition to these rather unsurprising constraints, we also have a newcomer: `MonadFix`. `MonaFix`
+In addition to these rather unsurprising constraints, we also have a newcomer: `MonadFix`. `MonadFix`
 denotes the class of monads that can be used for time traveling, that is, monads that can hold references
 to the future results of their computation. We combine these into a single alias, `MonadResolver`.
 
@@ -419,7 +436,7 @@ to the function's arguments for typechecking to work). For this reason, we call 
 
 Besides the environment and the term being resolved (both of which are actually accepted as `ResolveTerm`s, for
 reasons that will become clear shortly), this function also accepts a `Maybe (S.Term, S.Term)`. This argument, like
-many of the `Maybe`s we've encountered so far in this module, represents the current defintion (with `Nothing`
+many of the `Maybe`s we've encountered so far in this module, represents the current definition (with `Nothing`
 meaning that the current definition is not available within the expression being elaborated). Unlike the
 `Maybe S.Term` in `mkMSelf`, though, this argument also contains a reference to the future term, which
 is eventually substituted into the resolved expression.
