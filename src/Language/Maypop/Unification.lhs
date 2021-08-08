@@ -70,6 +70,15 @@ are bound to. For this, we also define a `substitute` method.
 >     occurs :: k -> v -> Bool
 >     substitute :: k -> v -> v -> v
 
+Wait a moment, what's up with `ExtraClass`? It so happens
+that there are sometimes additional restrictions before
+a term can be called `Unifiable`. For instance, the `Context`
+data type is only unifiable if it has access to an infinite
+stream of fresh identifiers. We encode this by allowing
+instances of `Unifiable` to place further constraints on
+the underlying unification monad `m`, through listing
+them in the `ExtraClass` type family declaration.
+
 With the three basic `Unifiable` operations in place, we can define
 some helper functions. As we said before, unification should fail
 when the "occurs check" fails; why not define a convenient little
