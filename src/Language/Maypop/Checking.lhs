@@ -5,6 +5,7 @@ Let's work on type inference a little.
 > {-# LANGUAGE UndecidableInstances #-}
 > {-# LANGUAGE MonoLocalBinds #-}
 > {-# LANGUAGE MultiParamTypeClasses #-}
+> {-# LANGUAGE ConstraintKinds #-}
 > module Language.Maypop.Checking where
 > import Language.Maypop.Syntax
 > import Language.Maypop.Eval
@@ -20,8 +21,6 @@ Let's work on type inference a little.
 > import Data.Void
 > import Data.Maybe
 > import qualified Data.Map as Map
-
-{{< todo >}}Explain the names in the environment.{{< /todo >}}
 
 First, a little utility function to compute the type of a type. This
 is straight out of the paper on the Calculus of Inductive Constructions.
@@ -70,23 +69,41 @@ can define a trivial type class instance, `MonadInfer k`, which implies
 all of the other common constraints. The `k` in this definition is the type
 of parameters that our terms are parameterized by.
 
-> class (Eq k, MonadReader [(String, ParamTerm k)] m, MonadError TypeError m, MonadUnify k (Context String k) m, MonadInf String m) => MonadInfer k m where
-> instance (Eq k, MonadReader [(String, ParamTerm k)] m, MonadError TypeError m, MonadUnify k (Context String k) m, MonadInf String m) => MonadInfer k m where
+> type MonadInfer k m = (Eq k, MonadReader [(String, ParamTerm k)] m, MonadError TypeError m, MonadUnify k (Context String k) m, MonadInf String m)
+
+Note that unification (in `MonadUnify`) is defined to work on _contexts_. This is because
+it's not impossible to determine from a `Term` alone whether or not it can be unified
+with another term. For instance, the `Ref 0` in `Abs (Ref 0)` is not the same as `Ref 0`
+without a surrounding abstraction. However, we frequently need to unify regular terms
+while performing type inference. For this, we define a helper function to retrieve
+the current context, and use the `unifyInContext` function from the `Context` module
+to achieve our goal.
 
 > unifyTerms :: MonadInfer k m => ParamTerm k -> ParamTerm k -> m (ParamTerm k)
 > unifyTerms t1 t2 = do { bs <- asks (map fst); unifyInContext bs t1 t2 }
+
+A similar approach is required for reifying terms:
 
 > reifyTerm :: MonadInfer k m => ParamTerm k -> m (ParamTerm k)
 > reifyTerm t = do 
 >     bs <- asks (map fst)
 >     ctxValue <$> reify (Context bs Nothing (Just t)) >>= maybe mzero return
->
+
+Although it's not needed here, we will also add a form of `reifyTerm` that
+allows us to increase the number of elements in the context before reifying.
+
 > reifyTermOffset :: MonadInfer k m => Int -> ParamTerm k -> m (ParamTerm k)
 > reifyTermOffset i = extendAll (replicate i (Sort Prop)) . reifyTerm
 
-Finally, on to the type inference function. We use the `MonadReader`
-typeclass to require read-only access to the local environment \\(\\Gamma\\).
-This function is so complicated that we should go through it case-by-case.
+In our new `MonadInfer`, We use the `MonadReader` typeclass to require read-only access
+to the local environment \\(\\Gamma\\). Notice that although we are using DeBrujin
+indexing for variables (and thus have no need to keep track of their names for typechecking
+purposes), our environment is made up of `String, ParamTerm k` pairs. The strings
+are _not_ names. Rather, they are unique identifiers. Check the `Context` module
+for a thorough explanation!
+
+Finally, on to the type inference function.  This function is so complicated that we
+should go through it case-by-case.
 
 > infer :: MonadInfer k m => ParamTerm k -> m (ParamTerm k)
 
@@ -104,9 +121,16 @@ argument is irrelevant to a function's type.
 
 > infer (Fun f) = return $ parameterize $ fFullType f
 
-The case for parameters must be present, but I'm not currently
-sure what the best way of handling it is. For now, it remains
-unimplemented.
+When we encounter a parameter, we may or may not known
+its type. However, no matter what happens, for the
+parameter to be valid, it must be compatible with
+the current scope (it must not, for example, have
+free variables). We thus use `bind` to record
+the current scope (`bs`). Then, if the term
+has a known type, we simply return that type;
+otherwise, we instantiate yet another unification variable
+to stand in for the term's type, associate it with
+the term, and return it.
 
 > infer (Param p) = do
 >     bs <- asks (map fst)
@@ -272,37 +296,7 @@ each branch, and return the case expression's final type.
 >     zipWithM constr (zip [0..] $ iConstructors i) ts
 >     return $ substituteMany 0 (t:inds) tt
 
-And that's it! We've made it through the type inference code. There
-are still helper functions remaining for us to implement. For instance,
-this code that we've written is polymorphic over some `MonadInfer m`,
-but when we actually run the code, we want some _particular_ `m`!
-For now, we leave actual unification aside, and use a specialized
-`UnifyEqT` monad transformer that operates on non-parameterized terms.
-In this case, unification is reduced to a trivial equality comparison,
-and we're effectively just perfoming type checking. The entire
-monad transformer stack for `MonadInfer Void` (the inference monad
-for non-parameterized expressions) is as follows:
-
-> type InferE a = UnifyEqT (Context String Void) (ExceptT TypeError (InfT String (Reader [(String, Term)]))) a
-
-We can add a function to actually run an instance of this monad,
-potentially failing with a `TypeError`:
-
-> runInferE :: InferE a -> Either TypeError a
-> runInferE m = runReader (runInfT (runExceptT $ runUnifyEqT m)) []
-
-We also write a function to specifically run
-our `infer`, which is special case of `runInferE`.
-
-> runInfer :: Term -> Either TypeError Term
-> runInfer = runInferE . infer
-
-> type InferU k a = UnifyT k (Context String k) (ExceptT TypeError (InfT String (Reader [(String, ParamTerm k)]))) a
->
-> runInferU :: (Eq k, Infinite k) => InferU k a -> Either TypeError a
-> runInferU m = runReader (runInfT (runExceptT $ runUnifyT m)) []
-
-Our definition of `infer` contains a few utility functions in the; let's take a look
+Our definition of `infer` contains a few utility functions in it; let's take a look
 at all of them in turn. First up is the family of `infer*` functions, which
 not only perform inference, but also constraint the resulting type to be
 _something_, like a product type. First up is `inferS`. We need this function because
@@ -381,6 +375,11 @@ abstraction, leading us to use `offsetFree`. Thus, extending the environment loo
 > extendAll :: MonadInfer k m => [ParamTerm k] -> m a -> m a
 > extendAll = flip (foldr extend)
 
+Notice the `pop` in the definition of `extend'`. This `pop` retrieves
+a new unique identifier, which we then associate with the newly-created
+entry in the environment. This is what helps us ensure that unification
+does not erroneously combine similar but different terms.
+
 The Calculus of Constructions has cumulativity, and one of the rules for product
 types requires both input types \\(A\\) and \\(B\\) to be of the same sort \\(\\text{Type}_i\\). This
 need not be the case out of the box; however, types in CoC are
@@ -395,6 +394,44 @@ a total order, but we do have a join semilattice.
 > joinS (Type i) (Type j) = Type $ max i j
 > joinS (Type i) _ = Type i
 > joinS _ (Type i) = Type i
+
+And that's it! We've made it through the type inference code. There
+are still helper functions remaining for us to implement. For instance,
+this code that we've written is polymorphic over some `MonadInfer m`,
+but when we actually run the code, we want some _particular_ `m`!
+First, let's leave actual unification aside, and use a specialized
+`UnifyEqT` monad transformer that operates on non-parameterized terms.
+In this case, unification is reduced to a trivial equality comparison,
+and we're effectively just perfoming type checking. The entire
+monad transformer stack for `MonadInfer Void` (the inference monad
+for non-parameterized expressions) is as follows:
+
+> type InferE a = UnifyEqT (Context String Void) (ExceptT TypeError (InfT String (Reader [(String, Term)]))) a
+
+We can add a function to actually run an instance of this monad,
+potentially failing with a `TypeError`:
+
+> runInferE :: InferE a -> Either TypeError a
+> runInferE m = runReader (runInfT (runExceptT $ runUnifyEqT m)) []
+
+We also write a function to specifically run
+our `infer`, which is special case of `runInferE`.
+
+> runInfer :: Term -> Either TypeError Term
+> runInfer = runInferE . infer
+
+Of course, we _do_ want to perform unification, so that we can
+try and "guess" the types of terms whenever possible. We thus
+define another monad transformer stack, `InferU`, which actually
+has a unification context, `UnifyT k`.
+
+> type InferU k a = UnifyT k (Context String k) (ExceptT TypeError (InfT String (Reader [(String, ParamTerm k)]))) a
+
+Correspondingly, we define a `runInferU` function, which runs our
+new `InferU` monad in an empty environment.
+
+> runInferU :: (Eq k, Infinite k) => InferU k a -> Either TypeError a
+> runInferU m = runReader (runInfT (runExceptT $ runUnifyT m)) []
 
 We should also write some code to perform type checking on entire modules.
 For this, we need a way to verify the validity of a function. It is more
