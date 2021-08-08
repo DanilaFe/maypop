@@ -15,6 +15,7 @@ printFunction :: Function -> IO ()
 printFunction f = mapM_ (putStrLn . ("  "++)) $
     [ "Function name: " ++ fName f
     , "Function type: " ++ pretty (fFullType f)
+    , "Function body: " ++ pretty (expandFunction f :: Term)
     , ""
     ]
 
