@@ -798,8 +798,37 @@ to each variable introduced by the case expression's patterns.
 >         Just (s, Original) -> SmallerThan s
 >         Just (_, vs@SmallerThan{}) -> vs
 >         _ -> Unknown
->
+
+Finally, we reach one of the major functions in this module:
+resolving terms. Most of the rules are "structural", assembling
+resolved terms by resolving their sub-terms. At most, there's
+some bookkeeping (tracking applications via `withApp` and `clearApps`,
+introducing variable names via `withVar`). We'll list
+these "boring" cases first.
+
 > resolveTerm :: MonadResolver m => ParseTerm -> m ResolveTerm
+> resolveTerm (Ref (SymRef s)) = lookupQual s
+> resolveTerm (Abs (x, tt) t) = clearApps $ liftA2 S.Abs (resolveTerm tt) (withVar x $ resolveTerm t)
+> resolveTerm (App l r) = liftA2 S.App (withApp r $ resolveTerm l) (resolveTerm r)
+> resolveTerm (Let (x, t) ti) = liftA2 S.Let (clearApps $ resolveTerm t) (withVar x $ resolveTerm ti)
+> resolveTerm (Prod (x, tt) t) = clearApps $ liftA2 S.Prod (resolveTerm tt) (withVar x $ resolveTerm t)
+> resolveTerm (Sort s) = return $ S.Sort s
+
+The first interesting case is that of a unqualified reference. 
+The case is interesting because this is precisely the place where
+our fixpoint detection will occur (the same is not true for the fully
+qualified case, since the function is not yet placed into the global
+scope, and thus is not listed under a fully qualified name). Recall that the
+`lookupVar` function may return to us `Left ()`, indicating that we
+encountered a reference to `Self`, `Right i`, returning to use the DeBrujin
+index `i` of the variable `s`, or `Nothing`, letting us know that
+the current name is not part of the "local" scope, and must be a definition
+from the `GlobalScope`. In the `Left ()` case, we first call `recordFixpoint`,
+storing the arguments to the recursive call that we found to decrease. In
+the last two lines of this case, we retrieve the list of `ParamType`s
+of the current function, and use it to insert placeholders as necessary
+via `insertLeading`. The other two cases require little further explanation.
+
 > resolveTerm (Ref (StrRef s)) = do
 >     vref <- lookupVar s
 >     case vref of
@@ -809,32 +838,49 @@ to each variable introduced by the case expression's patterns.
 >             return $ insertLeading (fromMaybe [] pts) (S.Param SelfRef)
 >         Just (Right i) -> return $ (S.Ref i)
 >         Nothing -> lookupUnqual s
-> resolveTerm (Ref (SymRef s)) = lookupQual s
-> resolveTerm (Abs (x, tt) t) = clearApps $ liftA2 S.Abs (resolveTerm tt) (withVar x $ resolveTerm t)
-> resolveTerm (App l r) = liftA2 S.App (withApp r $ resolveTerm l) (resolveTerm r)
-> resolveTerm (Let (x, t) ti) = liftA2 S.Let (clearApps $ resolveTerm t) (withVar x $ resolveTerm ti)
-> resolveTerm (Prod (x, tt) t) = clearApps $ liftA2 S.Prod (resolveTerm tt) (withVar x $ resolveTerm t)
-> resolveTerm (Sort s) = return $ S.Sort s
-> resolveTerm e@(Case t x ir tt bs) = do
->     t' <- clearApps $ resolveTerm t
+
+The second interesting case is that of case expressions. Here, we still
+perform resolution on subterms, but a little more setup is necessary:
+we need to determine whether or not we have to mark the newly introduced
+variables with a size. This is where our `resolveBranch` and matchBranch`
+functions come in: the former is used to process each branch in turn,
+and they are arranged in proper order by calling `matchBranch` for
+every constructor.
+
+> resolveTerm e@(Case t x ir tt bs) = clearApps $ do
+>     t' <- resolveTerm t
 >     vs <- caseTermSize t
 >     (i, is) <- resolveIndRef ir
->     tt' <- clearApps $ withVars (x:is) $ resolveTerm tt
+>     tt' <- withVars (x:is) $ resolveTerm tt
 >     bs' <- mapM (resolveBranch vs) bs
 >     cbs <- mapM (matchBranch bs') $ iConstructors i
 >     return $ S.Case t' i tt' cbs
->
-> decreasingIndices :: [String] -> [String] -> [Int]
-> decreasingIndices args dec = sort $ catMaybes $ map (`elemIndex` args) dec
->
-> findDecreasing :: MonadResolver m => [String] -> m (Maybe Int)
-> findDecreasing args = do
->     dec <- fmap (decreasingIndices args . Set.toList) <$> gets rsDecreasing
->     case dec of
->         Just (x:_) -> return $ Just x
->         Just [] -> throwError InvalidFixpoint
->         _ -> return Nothing
->
+
+That's it for terms! What remains is to resolve the various
+function and inductive data type definitions. We can start
+with functions. The process here is fairly straightforward:
+
+* We elaborate the function's type. This returns us a single
+  term, like `Nat -> Nat -> Nat` in the case of a function like `plus`.
+* We then pick off the types of the function parameters. For instance,
+  if the function was defined as `plus x y = ...`, we'd pick off
+  the two `Nat`s (one for `x` and one for `y`), and leave a single
+  `Nat` behind.
+* We then set up the environment for resolving and elaborating the
+  function's body. Here we use `rec f' <-`, which is a bit of special
+  syntax from `MonadFix` that makes `f'` available on the right hand
+  side of the `do`-notation arrow as a handle on the computation's future
+  result. We use `withNoDecreasing` to clear the set of decreasing arguments,
+  and `withFunction` to add the current function's type, future term, etc.
+  to the environment.
+* Next, we resolve the function's body. While doing so,
+  our code called `recordFixpoint` for every recursive occurence,
+  so we're ready to read that information. We do so with `findDecreasing`,
+  which provides us the last piece of information required to create a `Function`.
+  We return what we create.
+* Finally, we `emitFun` to add our new function to the global scope, and
+  `return` our result.
+
 > resolveFun :: MonadResolver m => ParseFun -> m Function
 > resolveFun f = do
 >     fts <- resolveTerm (pfType f) >>= elaboratePlain
@@ -845,22 +891,75 @@ to each variable introduced by the case expression's patterns.
 >          return $ Function (pfName f) (zip ats (pfParamTypes f)) rt fb dec
 >     emitFun (pfName f) f'
 >     return f'
->
+
+As usual, we used helper functions in the above definition. The first helper
+function is `findDecreasing`; it retrieves the now-accurate
+set of decreasing arguments from the state, and converts it into indices
+of the function's parameters (we do not use names in our final representation).
+Three cases are possible.
+
+1. We are not a recursive function. In this case, `dec` is `Nothing`,
+   and we simply return `Nothing`. A `Maybe` in a function's decreasing
+   parameter field tells Maypop to use regular old beta reduction when
+   evaluating it.
+2. We are a recursive function, and at least one argument is always
+   decreasing. We return the index of this argument wrapped in `Just`,
+   indicating that our function is recursive and decreasing on the `x`th
+   argument.
+3. We are a recursive function, but no argument is reliably decreasing.
+   This is an error, which we report as `InvalidFixpoint`.
+
+> findDecreasing :: MonadResolver m => [String] -> m (Maybe Int)
+> findDecreasing args = do
+>     dec <- fmap (decreasingIndices args . Set.toList) <$> gets rsDecreasing
+>     case dec of
+>         Just (x:_) -> return $ Just x
+>         Just [] -> throwError InvalidFixpoint
+>         _ -> return Nothing
+
+The `findDecreasing` helper itself uses a helper, `decreasingIndices`.
+This function simply maps decreasing arguments to their indices in
+the list of all of the function's parameters.
+
+> decreasingIndices :: [String] -> [String] -> [Int]
+> decreasingIndices args dec = sort $ catMaybes $ map (`elemIndex` args) dec
+
+The second helper used by `resolveFun` is `collectFunArgs`, which is used to
+turn a single function term (like the `Nat -> Nat -> Nat` example above) into
+a list of parameter types and a return type. The implementation simply "picks off"
+instances of the `Prod` constructor.
+
 > collectFunArgs :: [String] -> (S.ParamTerm a) -> Either ResolveError ([S.ParamTerm a], S.ParamTerm a)
 > collectFunArgs [] t = return $ ([], t)
 > collectFunArgs (_:xs) (S.Prod l r) = first (l:) <$> collectFunArgs xs r
 > collectFunArgs _ _ = throwError InvalidArity
->
-> resolveParams :: MonadResolver m => [ParseParam] -> m [ResolveTerm]
-> resolveParams = foldr (\(x, t) m -> liftA2 (:) (resolveTerm t) (withVar x m)) (return [])
->
-> resolveConstr :: MonadResolver m => ParseConstr -> m S.Constructor
-> resolveConstr pc = do
->     ps' <- resolveParams (pcAllParams pc)
->     is' <- withVars (pcParamNames pc) $ mapM resolveTerm (pcIndices pc)
->     (ps'', is'') <- elaborateCon ps' is'
->     return $ Constructor (zip ps'' (pcParamTypes pc)) is'' (pcName pc)
->
+
+That's all for function definitions. Let's move on to inductive definitions!
+Some amount of mechanical manipulation is required in this function's
+implementation, but its general structure is fairly similar to
+that of `resolveFun`:
+
+* We resolve the inductive data type's type. This is similar
+  to what we did with the function definition's type, except
+  that in data type definitions we're already _given_ separate
+  parameter, index, and return types. Our task of resolving
+  them becomes that much more difficult, though: each parameter
+  introduces a new name, on which subsequent parameters may
+  possibly depend. To resolve a list of parameters, we have to
+  use a special helper, `resolveParams`.
+* Since we need the inductive data type's type, we reassmble the indices
+  and parameters into `it`.
+* Now knowing the type of the inductive data type, we prepare to
+  typecheck each of the constructors. We once again use
+  the `rec` notation from `MonadFix` to get a handle on our
+  future inductive type, and call `withInductive` (not bothering
+  to use `withNoDecreasing`).
+* Next, we actually resolve each of the constructors. This is handled
+  by `resolveConstr`, which we will look at shortly.
+* Now finished with the resolution, we emit the inductive
+  data type and its constructors (placing them into the global scope),
+  and `return`.
+
 > resolveInd :: MonadResolver m => ParseInd -> m S.Inductive
 > resolveInd pi = do
 >     its <- resolveParams (piAllParams pi ++ piArity pi) >>= elaborateInd
@@ -872,14 +971,50 @@ to each variable introduced by the case expression's patterns.
 >     emitInd (piName pi) i' 
 >     emitConstructors i'
 >     return i'
-> 
+
+This time, constructors don't appear to be too much of a hassle. We
+use the same `resolveParams` helper as we did in `resolveInd` to get
+a list of the constructor's parameters, and then separately resolve
+the constructor's indices in the environment extended with the names
+of the constructor's parameters. The last step is a call to elaboration,
+and we are left with a valid `Constructor` instance.
+
+> resolveConstr :: MonadResolver m => ParseConstr -> m S.Constructor
+> resolveConstr pc = do
+>     ps' <- resolveParams (pcAllParams pc)
+>     is' <- withVars (pcParamNames pc) $ mapM resolveTerm (pcIndices pc)
+>     (ps'', is'') <- elaborateCon ps' is'
+>     return $ Constructor (zip ps'' (pcParamTypes pc)) is'' (pcName pc)
+
+The actual implementation of the `resolveParams` helper is actually quite simple.
+For each named term in the list, we resolve the term, and then resolve the remaining
+terms in an environment extended with the term's name. This happens recursively,
+so for \\(x_1:\\tau_1, x_2:\\tau_2, x_3:\\tau_3\\), \\(x_1\\) is resolved
+by itself, \\(x_2\\) is resolved in an environment containing \\(x_1\\),
+and \\(x_3\\) is resolved with awareness of both \\(x_1\\) and \\(x_2\\).
+
+> resolveParams :: MonadResolver m => [ParseParam] -> m [ResolveTerm]
+> resolveParams = foldr (\(x, t) m -> liftA2 (:) (resolveTerm t) (withVar x m)) (return [])
+
+Now able to resolve both function definitions and inductive definitions,
+we write a function to resolve a `ParseDef` into a `Definition`. It is
+in this function that we use `emitDef`, and thus update the part of the
+`Module` data structure that we are currently in the process of constructing.
+
 > resolveDef :: MonadResolver m => ParseDef -> m Definition
 > resolveDef d = do
 >     dc <- either (fmap IndDef . resolveInd) (fmap FunDef . resolveFun) d
 >     let def = Definition Public dc
 >     emitDef (dName def) def
 >     return def
->
+
+Finally, we tie all this together in `resolveDefs`. This function receives
+an already-parsed module header, a `GlobalScope` containing the definitions
+from all of the module's imports, and a mapping of strings to parsed
+definitoins that need to be resolved. It may, of course, fail, but if it suceeds,
+it returns a map of definition names to their implementations, which will
+become part of the `Module` record.
+
 > resolveDefs :: ModuleHeader -> GlobalScope -> [(String, ParseDef)] -> Either ResolveError (Map.Map String Definition)
 > resolveDefs mh gs ps = (rsDefs . snd) <$> (runExcept $ runReaderT (runStateT (mapM (resolveDef . snd) ps) state) env)
 >     where
