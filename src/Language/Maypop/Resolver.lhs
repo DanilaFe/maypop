@@ -240,7 +240,7 @@ If we descend into something like a lambda abstraction, whatever terms were
 applied to the current term are no longer meaningful (it's more complicated
 to track the sizes of variable across aliasing). To be safe rather than sorry,
 we discard all applications so far when processing such terms. This is strictly
-a conservative strategy, sicne it will never cause false positive decreasing
+a conservative strategy, since it will never cause false positive decreasing
 arguments, but may
 {{< sidenote "right" "fixpoint-note" "fail to detect valid instances of recursion." >}}
 Indeed, even "real" languages like Coq have this problem. Some "elegant" ways of
@@ -445,6 +445,14 @@ ensuring the environment's validity as usual), sparing us the otherwise necessar
 >         (Just t', Just k) -> liftA2 (,) (stripEnv $ map (subst k t') ienv) (stripBody $ subst k t' it)
 >         _ -> liftA2 (,) (stripEnv ienv) (stripBody it)
 
+At the very top of `elaborateInEnv` is a call to `inferWithin`. Thus little function
+allows us to "switch contexts", and perform operations in a type inference monad instead
+of a resolution monad. The underlying implementation is simple: we run the inference monad
+and convert the error into a `MonadResolver`-compatible type.
+
+> inferWithin :: MonadResolver m => InferU String a -> m a
+> inferWithin m = liftEither $ first InferError $ runInferU m 
+
 The rest of the elaboration functions use `elaborateInEnv` in a variety of ways. The simplest
 case is elaborating something like the type of a function, which cannot have a recursive referene
 to the function itself, and which does not occur inside any environment. We call this case
@@ -478,7 +486,51 @@ the function's arguments, as explained above.
 >     (cd, cf) <- selfFunction
 >     (_, ebt) <- elaborateInEnv (Just (cdFutureTerm cd, cdType cd)) (parameterizeAll $ cfParams cf) bt
 >     return ebt
->
+
+Constructors seem to always require a bit more hassle. First and foremost, constructors
+can reference their own data type, which we treat as a `SelfRef`. For this reason, we
+require that the "current inductive type" is present, retrieving it via `selfInductive`.
+A constructor is parameterized by both the inductive type's parameters (for instance,
+the `a` from `List a` is available to `Cons` and `Nil`) and its own parameters. These
+are all present when elaborating its result type (and the constructor's parameter
+types themselves need to be elaborated themselves). We store this combined list
+of parameters into `allPs`.
+
+A
+{{< sidenote "left" "data-constructor-note" "(data) constructor" >}}
+Like <code>Nil</code>, <code>Cons</code>, <code>Left</code> or <code>Right</code> for example.
+{{< /sidenote >}}
+always implicitly applies its
+{{< sidenote "right" "type-constructor-note" "(type) constructor">}}
+The <em>type</em> constructors for the <em>data constructors</em> listed
+previously are <code>List</code> and <code>Either</code>.
+{{< /sidenote >}}
+to the inductive data type parameters. For instance, in the case of list `List a`, `Cons` will always return `List a`,
+and not `List b`. Similarly, the type constructors `Left` and `Right` of an `Either` data type, which accepts
+two type parameters, `A` and `B`,
+{{< sidenote "left" "index-note" "will always produce" >}}
+Note that this is only the case for <em>parameters</em>, which are shared
+between all constructors. Indices are not automatically filled in, and each (data) constructor
+can specify the indices it feeds as parameters to its (type) constructor. This is how we can
+have GADTs.<br>
+For example, we can have a vector <code>Nil</code> constructor return <code>Vec A O</code>,
+while <code>Cons</code> would return <code>Vec A (S n)</code> for some natural number <code>n</code>.
+{{< /sidenote >}}
+`Either A B`.  We thus generated references to these parameters by simply generating the sequence
+\\(n+k,\\ldots,1+k,k\\), where \\(n\\) is the number of inductive parameters, and \\(k\\) is the number
+of the constructor's own parameters, which are _not_ automatically applied, and simply cause an
+offset to the DeBrujin indices we need. This sequence is stored in `paramRefs`. Finally,
+we assemble the whole type to be elaborated and feed it through `elaborateInEnv`. We have
+to perform a bit of a hacky trick here: we want to retrieve the results of elaborating the indices
+of the constructor, but those have been fused into a series of type constructor applications.
+We thus use the `collectApps` function from our `Checking` module, which extracts the arguments
+applied to some inductive data type. This isn't quite ideal because we know that an error is impossible
+here: we just assembled a valid application, and should thus get a valid application back. However,
+`collectApps` does not know about this, and we must add code to handle impossible errors.
+
+When returning from the constructor application, we drop the inductive data type's parameters
+from everywhere: they have already been elaborated elsewhere.
+
 > elaborateCon :: MonadResolver m => [ResolveTerm] -> [ResolveTerm] -> m ([S.Term], [S.Term])
 > elaborateCon ps is = do
 >     (cd, ci) <- selfInductive
@@ -489,10 +541,16 @@ the function's arguments, as explained above.
 >     (eps, eret) <- elaborateInEnv (Just (cdFutureTerm cd, cdType cd)) allPs ret
 >     (_, eretas) <- liftEither $ first (const InvalidResolve) $ collectApps eret
 >     return (drop (length ips) eps, drop (length ips) eretas)
->
-> inferWithin :: MonadResolver m => InferU String a -> m a
-> inferWithin m = liftEither $ first InferError $ runInferU m 
->
+
+That's all for the various elaboration functions. Next for some bookkeeping!
+As we saw above, we use a state monad to keep track of the decreasing arguments
+of our potentially recursive functions. Each time we resolve a function, we
+must be careful to start fresh, without accidentally assuming that
+the decreasing parameters of the _previous_ function match that of the current
+one. For this reason, we write a little helper to perform a monadic
+operation in a state with no recorded decreasing arguments, which
+we can conveniently use to get a "blank slate".
+
 > withNoDecreasing :: MonadState ResolveState m => m a -> m a
 > withNoDecreasing m = do
 >     dec <- gets rsDecreasing
@@ -500,53 +558,37 @@ the function's arguments, as explained above.
 >     a <- m
 >     modify $ \rs -> rs { rsDecreasing = dec }
 >     return a
->
-> emitDecreasing :: MonadState ResolveState m => Set.Set String -> m ()
-> emitDecreasing s = modify $ \rs -> rs { rsDecreasing = updateDec (rsDecreasing rs) }
+
+Now, we finally get to recording the decreasing arguments of a function.
+There are two possible situations:
+
+* `rsDecreasing` is `Nothing`. This means that until now, there have
+  been no recursive calls, and we have had no need to record decreasing
+  arguments. In this case, the given set of potential candidates for
+  the decreasing argument becomes the current set.
+* `rsDecreasing` is `Just s'`, an existing set of decreasing arguments.
+  We then intersect `s` with `s'`, since only arguments that are in
+  both of those lists can still be candidates (a decreasing argument
+  is always decreasing, not just sometimes).
+
+{{< todo >}}
+This is just the monoid instance for Maybe with Set's intersection
+as the underlying semigroup. That means, this code can be way more
+concise.
+{{< /todo >}}
+
+> recordDecreasing :: MonadState ResolveState m => Set.Set String -> m ()
+> recordDecreasing s = modify $ \rs -> rs { rsDecreasing = updateDec (rsDecreasing rs) }
 >     where
 >         updateDec Nothing = Just s
 >         updateDec (Just s') = Just $ Set.intersection s s'
-> 
-> emitExport :: MonadResolver m => String -> ExportVariant -> m ()
-> emitExport s ev = do
->     mn <- currentModule
->     let export = Export ev mn
->     let nQual = Map.singleton (qualName mn s) export
->     let nUnqual = Map.singleton (unqualName s) [export]
->     let ngs = GlobalScope nQual nUnqual
->     gs' <- gets ((`mergeScopes` ngs) . rsScope) >>= (liftEither . first ImportError)
->     modify $ \rs -> rs { rsScope = gs' }
->
-> emitInd :: MonadResolver m => String -> Inductive -> m ()
-> emitInd s i = emitExport s (IndExport i)
->
-> emitFun :: MonadResolver m => String -> Function -> m ()
-> emitFun s f = emitExport s (FunExport f)
->
-> emitDef :: MonadResolver m => String -> Definition -> m ()
-> emitDef s d = modify $ \rs -> rs { rsDefs = Map.insert s d $ rsDefs rs }
->
-> emitConstructors :: MonadResolver m => Inductive -> m ()
-> emitConstructors i = zipWithM_ emitConstructor [0..] (iConstructors i)
->     where emitConstructor ci c = emitExport (cName c) (ConExport i ci)
->
-> insertLeading :: [ParamType] -> ResolveTerm -> ResolveTerm
-> insertLeading ps t = foldl S.App t $ replicate (length $ takeWhile (==Inferred) ps) (S.Param Placeholder)
->
-> exportToTerm :: Export -> ResolveTerm
-> exportToTerm e = case eVariant e of
->     FunExport f -> insertLeading (map snd $ fArity f) (S.Fun f)
->     ConExport i ci -> S.Constr i ci
->     IndExport i -> S.Ind i
-> 
-> narrowExports :: MonadResolver m => [Export] -> m Export
-> narrowExports [] = throwError UnknownReference
-> narrowExports [x] = return x
-> narrowExports _ = throwError AmbiguousReference
->
-> smallerParams :: [Maybe (String, VarSize)] -> Set.Set String
-> smallerParams mps = Set.fromList $ catMaybes $ map (>>=(varParent . snd)) mps
->
+
+Building on `recordDecreasing`, we define `recordFixpoint`, which
+looks into the environment, ensures that we are currently
+within _some_ definition, and, if this definition is
+a function, retrieves the current applications that are
+"decreasing" from `reApps`, and records them with `recordDecreasing`.
+
 > recordFixpoint :: MonadResolver m => m ()
 > recordFixpoint =
 >     do
@@ -557,60 +599,205 @@ the function's arguments, as explained above.
 >         record cf = do
 >             params <- take (length $ pfArity cf) <$> asks reApps
 >             smallerParams <- smallerParams <$> mapM termSize params
->             emitDecreasing smallerParams
-> 
-> lookupUnqual :: MonadResolver m => String -> m ResolveTerm
-> lookupUnqual s = do
->     es <- gets (fromMaybe [] . Map.lookup (unqualName s) . sUnqualified . rsScope)
->     exportToTerm <$> narrowExports es
->
-> lookupQual :: MonadResolver m => Symbol -> m ResolveTerm
-> lookupQual s = do
->     me <- gets (Map.lookup s . sQualified . rsScope)
->     maybe (throwError UnknownReference) (return . exportToTerm) me
->
-> lookupRef :: MonadResolver m => ParseRef -> m ResolveTerm
-> lookupRef (SymRef s) = lookupQual s
-> lookupRef (StrRef s) = lookupUnqual s
->
-> lookupInd :: MonadResolver m => ParseRef -> m S.Inductive
-> lookupInd r = do
->     t <- lookupRef r
->     case t of
->         S.Ind i -> return i
->         _ -> throwError NotInductive
->
-> resolveIndRef :: MonadResolver m => ParseIndRef -> m (S.Inductive, [String])
-> resolveIndRef (r, is) = do
->     i <- lookupInd r
->     if length (iArity i) == length is
->      then return (i, is)
->      else throwError InvalidArity
->
-> resolveBranch :: MonadResolver m => VarSize -> ParseBranch -> m (String, ResolveTerm)
-> resolveBranch vs (s, ps, t) = (,) s <$> withSizedVars vs ps (resolveTerm t)
->
-> matchBranch :: MonadResolver m => [(String, ResolveTerm)] -> Constructor -> m ResolveTerm
-> matchBranch bs c = maybe (throwError IncompleteMatch) return $ lookup (cName c) bs 
->
+>             recordDecreasing smallerParams
+
+For the above function, we use two little helpers. The first is a function `termSize`,
+which, unsurprisingly, returns the "size" of a particular term. For now, we
+only allow references to have sizes, and treat other terms as "incomparable"
+(and thus, never decreasing).
+
 > termSize :: MonadResolver m => ParseTerm -> m (Maybe (String, VarSize))
 > termSize (Ref (StrRef s)) = Just . (,) s <$> varSize s
 > termSize _ = return Nothing
->
-> caseTermSize :: MonadResolver m => ParseTerm -> m VarSize
-> caseTermSize t = do
->     mts <- termSize t
->     return $ case mts of
->         Just (s, Original) -> SmallerThan s
->         Just (_, vs) -> vs
->         _ -> Unknown
->
+
+The second is called `smallerParams`; it is given a list of term sizes produced
+by `termSize`, and converts this list into a set of original parameter names
+that "decreased".
+
+> smallerParams :: [Maybe (String, VarSize)] -> Set.Set String
+> smallerParams mps = Set.fromList $ catMaybes $ map (>>=(varParent . snd)) mps
+
+Aside from emitting decreasing arguments, we will also emit exports
+that are produced within this module, to be added to the current
+scope and made available from subsequent definitions.
+
+> emitExport :: MonadResolver m => String -> ExportVariant -> m ()
+> emitExport s ev = do
+>     mn <- currentModule
+>     let export = Export ev mn
+>     let nQual = Map.singleton (qualName mn s) export
+>     let nUnqual = Map.singleton (unqualName s) [export]
+>     let ngs = GlobalScope nQual nUnqual
+>     gs' <- gets ((`mergeScopes` ngs) . rsScope) >>= (liftEither . first ImportError)
+>     modify $ \rs -> rs { rsScope = gs' }
+
+We can also define small helper functions that automatically
+wrap inductive definitions or functions in their appropriate `Export`
+constructor, and emit them. Here's one for functions:
+
+> emitInd :: MonadResolver m => String -> Inductive -> m ()
+> emitInd s i = emitExport s (IndExport i)
+
+And here's one for inductive data types, which is almost identical.
+
+> emitFun :: MonadResolver m => String -> Function -> m ()
+> emitFun s f = emitExport s (FunExport f)
+
+Finally, here's a slightly more involved one for constructors.
+This one actually calls `emitExport` several times, once for
+each constructor.
+
+> emitConstructors :: MonadResolver m => Inductive -> m ()
+> emitConstructors i = zipWithM_ emitConstructor [0..] (iConstructors i)
+>     where emitConstructor ci c = emitExport (cName c) (ConExport i ci)
+
+Despite the similar name, `emitDef` has a different
+purpose compared to the previous handful of functions. Whereas
+`emitExport`, `emitInd`, and `emitFun` augment the current
+scope with the newly emitted definitions, recall (from the `Modules` module),
+that such a `GlobalScope` is _computed_ from a `Module` when it is imported.
+A `GlobalScope` contains _all_ definitions available to code in a module,
+including those imported from elsewhere. Of course, we don't want to
+re-compute a `GlobalScope` every time, so modifying one with new exports
+makes sense. However, we also need to maintain a "clean" copy, a `Module`
+instance, which contains the visibilities / access modifiers of each
+definition from only the current module. The task of `emitDef` is to
+update this instance (specifically, the mapping of names to `Definition` instances).
+
+> emitDef :: MonadResolver m => String -> Definition -> m ()
+> emitDef s d = modify $ \rs -> rs { rsDefs = Map.insert s d $ rsDefs rs }
+
+Next, we'll move a bit further into the process of resolution. Our next
+function, `insertLeading`, will take a list of parameter types (which
+can be either `Inferred` or `Explicit`, with `Inferred` parameters being
+guessed using unification and) and insert the appropriate number of
+`Placeholder` instances, which will eventually be processed by the
+elaboration code. For now, we only handle the case of _leading_
+inferred arguments (that is, placeholders can only occur at the
+beginning of a call, and not in the middle).
+
+> insertLeading :: [ParamType] -> ResolveTerm -> ResolveTerm
+> insertLeading ps t = foldl S.App t $ replicate (length $ takeWhile (==Inferred) ps) (S.Param Placeholder)
+
+We then use `insertLeading` in the implementation of `exportToTerm`.
+For the time being, we only do this with occurences of functions,
+and not type- or data-constructors.
+
+> exportToTerm :: Export -> ResolveTerm
+> exportToTerm e = case eVariant e of
+>     FunExport f -> insertLeading (map snd $ fArity f) (S.Fun f)
+>     ConExport i ci -> S.Constr i ci
+>     IndExport i -> S.Ind i
+
+While we're messing with `ParamType`s, let's also define a function
+to retrieve the current definition's parameter types. In agreement
+with our `exportToTerm` function, we only allow functions' implicit
+arguments to be turned into placeholders (for the time being). 
+
 > currentParamTypes :: MonadResolver m => m (Maybe [ParamType])
 > currentParamTypes = do
 >     mcd <- asks reCurrentDef
 >     return $ case cdExtra <$> mcd of
 >         Just (Right cf) -> Just $ pfParamTypes $ cfParsed cf
 >         Just Left{} -> Nothing
+
+We're finally getting closer to actually processing syntax trees.
+One particular scenario that we need to handle is the resolution
+of an unqualified name, like "length". It's possible that two things
+with the unqualified name "length" are present in current scope:
+maybe the length functions on lists and vectors. Thus, we look up
+the appropriate name in the `sUnqualified` field of our scope (`rsScope`),
+and hand it off to a helper function `narrowExports`.
+ 
+> lookupUnqual :: MonadResolver m => String -> m ResolveTerm
+> lookupUnqual s = do
+>     es <- gets (fromMaybe [] . Map.lookup (unqualName s) . sUnqualified . rsScope)
+>     exportToTerm <$> narrowExports es
+
+This little helper function implements the expected behavior for resolving
+a variable reference: if there is no known export with the given name,
+we have an `UnknownReference`; if there is more than one export with
+the given name, the reference is ambiguous. Only when the name corresponds
+to exactly one export do we successfully return it.
+
+> narrowExports :: MonadResolver m => [Export] -> m Export
+> narrowExports [] = throwError UnknownReference
+> narrowExports [x] = return x
+> narrowExports _ = throwError AmbiguousReference
+
+The qualified lookup function is simpler, since we do not
+allow two exports to occupy the same qualified name. Thus,
+we simply perform a lookup, and we're basically done.
+
+> lookupQual :: MonadResolver m => Symbol -> m ResolveTerm
+> lookupQual s = do
+>     me <- gets (Map.lookup s . sQualified . rsScope)
+>     maybe (throwError UnknownReference) (return . exportToTerm) me
+
+The two functions, `lookupUnqual` and `lookupQual`, are combined
+into a `lookupRef` function, which decides which lookup to
+perform depending on whether the given reference is a symbol
+(a qualified name) or a string (an unqualified name).
+
+> lookupRef :: MonadResolver m => ParseRef -> m ResolveTerm
+> lookupRef (SymRef s) = lookupQual s
+> lookupRef (StrRef s) = lookupUnqual s
+
+The next function, `lookupInd`, is just a wrapper of `lookupRef`
+that only succeeds if the export we found is an inductive data type.
+
+> lookupInd :: MonadResolver m => ParseRef -> m S.Inductive
+> lookupInd r = do
+>     t <- lookupRef r
+>     case t of
+>         S.Ind i -> return i
+>         _ -> throwError NotInductive
+
+We're gradually building up to resolving more and more complicated
+parts of our abstract syntax tree. Next up is `resolveIndRef`, which
+converts a `ParseIndRef` (a tuple of a reference and a list of strings,
+representing most generally the expression `M1.M2.T x y z`), which is
+used in the `return` portion of case expressions, into a tuple of the given
+inductive type and the list of strings. This function additionally checks
+that the `ParseIndRef` is valid: that is, we're not writing something like
+`Either A` where the valid equivalent would be `Either A B`.
+
+> resolveIndRef :: MonadResolver m => ParseIndRef -> m (S.Inductive, [String])
+> resolveIndRef (r, is) = do
+>     i <- lookupInd r
+>     if length (iArity i) == length is
+>      then return (i, is)
+>      else throwError InvalidArity
+
+Continuing with the case expression motif, we have `resolveBranch`, which introduces
+the variables from a case expression branch into the scope, and tries to resolve
+the branch's expression. For convenience, it also returns the constructor name
+that was used in the branch.
+
+> resolveBranch :: MonadResolver m => VarSize -> ParseBranch -> m (String, ResolveTerm)
+> resolveBranch vs (s, ps, t) = (,) s <$> withSizedVars vs ps (resolveTerm t)
+
+Given a list of the `(constructor name, term)` pairs produced by `resolveBranch`, we define
+a function `matchBranch` to find a `ResolveTerm` for a particular `Constructor`.
+
+> matchBranch :: MonadResolver m => [(String, ResolveTerm)] -> Constructor -> m ResolveTerm
+> matchBranch bs c = maybe (throwError IncompleteMatch) return $ lookup (cName c) bs 
+
+When do variables actually decrease in size? In Maypop, this will happen
+during pattern matching. If a reference `l` is case analyzed into
+a head `x` and tail `xs`, then `x` and `xs` are smaller than `l`,
+since they make up parts of l. This logic is implemented by
+`caseTermSize`, which, given a term that occurs as a scrutinee
+of a case expression, returns the `VarSize` that should be assigned
+to each variable introduced by the case expression's patterns.
+
+> caseTermSize :: MonadResolver m => ParseTerm -> m VarSize
+> caseTermSize t = do
+>     mts <- termSize t
+>     return $ case mts of
+>         Just (s, Original) -> SmallerThan s
+>         Just (_, vs@SmallerThan{}) -> vs
+>         _ -> Unknown
 >
 > resolveTerm :: MonadResolver m => ParseTerm -> m ResolveTerm
 > resolveTerm (Ref (StrRef s)) = do
