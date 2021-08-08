@@ -7,6 +7,7 @@ function objects or their DeBrujin indices.
 > {-# LANGUAGE FlexibleInstances #-}
 > {-# LANGUAGE UndecidableInstances #-}
 > {-# LANGUAGE MonoLocalBinds #-}
+> {-# LANGUAGE ConstraintKinds #-}
 > module Language.Maypop.Resolver where
 > import Prelude hiding (pi)
 > import Language.Maypop.Syntax hiding (ParamTerm(..), Term)
@@ -399,11 +400,7 @@ In addition to these rather unsurprising constraints, we also have a newcomer: `
 denotes the class of monads that can be used for time traveling, that is, monads that can hold references
 to the future results of their computation. We combine these into a single alias, `MonadResolver`.
 
-> class (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ResolveError m, MonadFix m)
->     => MonadResolver m where
->
-> instance (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ResolveError m, MonadFix m)
->     => MonadResolver m where
+> type MonadResolver m = (MonadReader ResolveEnv m, MonadState ResolveState m, MonadError ResolveError m, MonadFix m)
 
 Next, we'll write some code to perform type inference (including instantiation, type checking, and stripping of
 terms) in the monadic context with `MonadResolver`. The first thing we can get started on is retriving
@@ -444,9 +441,27 @@ is eventually substituted into the resolved expression.
 As we have observed above, an expression may be elaborated within a particular context. Rather than manually
 keeping track of this context everywhere in our `MonadResolver` code so that we may eventually feed it to
 `infer`, we opt for a simpler approach: when typechecking an expression \\(e\\) within an environment
-\\(x_1:\\tau_1, \\ldots, x_n:\\tau_n\\), we convert it into an expression \\(\\lambda (x_1:\\tau_1).\\ldots\\lambda (x_n:\\tau_n). e\\),
+\\(x_1:\\tau_1, \\ldots, x_n:\\tau_n\\), we
+{{< sidenote "right" "lambda-note" "convert it into an expression" >}}
+If this translation doesn't seem reasonable to you, consider the lambda abstraction
+type inference rule from the Calculus of Inductive Constructions:
+$$
+\frac{\Gamma,x:A \vdash t : B}{\Gamma \vdash \lambda (x:A). t : \forall x : A, B}
+$$
+The above rule, when the environment is empty, implies that the lambda abstraction is
+well-typed if its body is well-typed in an environment consisting of the abstraction's
+argument. Thus, if our chain of lambda abstractions is well-typed, then so is our
+body in an environment extended with all of the arguments.
+{{< /sidenote >}}
+\\(\\lambda (x_1:\\tau_1).\\ldots\\lambda (x_n:\\tau_n). e\\),
 and perform typechecking in an empty environment. That way, `infer` handles extending the environment (also
 ensuring the environment's validity as usual), sparing us the otherwise necessary duplication of code.
+
+The `elaborateInEnv` function thus creates a chain of \\(\\lambda\\)-abstractions, instantiates them,
+and performs type inference. After doing so, it checks to make sure that the resulting expression
+has no more occurences of unification variables, but not before replacing the "self-reference"
+unification variable with its future term. It is now safe to insert the future term into the expression,
+since no further computations (within this module) will depend on it.
 
 > elaborateInEnv :: MonadResolver m => Maybe (S.Term, S.Term) -> [ResolveTerm] -> ResolveTerm -> m ([S.Term], S.Term)
 > elaborateInEnv mtd env t = inferWithin $ do
@@ -462,7 +477,7 @@ ensuring the environment's validity as usual), sparing us the otherwise necessar
 >         (Just t', Just k) -> liftA2 (,) (stripEnv $ map (subst k t') ienv) (stripBody $ subst k t' it)
 >         _ -> liftA2 (,) (stripEnv ienv) (stripBody it)
 
-At the very top of `elaborateInEnv` is a call to `inferWithin`. Thus little function
+At the very top of `elaborateInEnv` is a call to `inferWithin`. This little function
 allows us to "switch contexts", and perform operations in a type inference monad instead
 of a resolution monad. The underlying implementation is simple: we run the inference monad
 and convert the error into a `MonadResolver`-compatible type.
@@ -480,11 +495,11 @@ to the function itself, and which does not occur inside any environment. We call
 
 A more interesting case is the elaboration of the parameters and indices
 of an inductive data type. This is where having our environment as a list of `ResolveTerm`s
-comes in handy: we make a call to `elaborateInEnv` and simply ask it to resolve the expresion
-`S.Sort Prop` (which clearly does not need to be resolved, since it has no placeholders and no
+comes in handy: we make a call to `elaborateInEnv` and simply ask it to process the expresion
+`S.Sort Prop` (which clearly does not need to be elaborated, since it has no placeholders and no
 self-references). By doing so with an environment made up of parameters an indices, though, we
 wrangle `infer` into typechecking each parameter and index in turn, each time extending the environment
-with the resulting type so that the subsequent parameters and indics (which, in the general
+with the resulting type so that the subsequent parameters and indices (which, in the general
 case, can depend on it) also typecheck correctly. Of course, we don't care for the result
 of elaborating `S.Sort Prop`; we merely throw it away, and return only the elaborated parameters
 and indices.
@@ -510,7 +525,7 @@ require that the "current inductive type" is present, retrieving it via `selfInd
 A constructor is parameterized by both the inductive type's parameters (for instance,
 the `a` from `List a` is available to `Cons` and `Nil`) and its own parameters. These
 are all present when elaborating its result type (and the constructor's parameter
-types themselves need to be elaborated themselves). We store this combined list
+types themselves need to be elaborated, too). We store this combined list
 of parameters into `allPs`.
 
 A
@@ -530,7 +545,7 @@ Note that this is only the case for <em>parameters</em>, which are shared
 between all constructors. Indices are not automatically filled in, and each (data) constructor
 can specify the indices it feeds as parameters to its (type) constructor. This is how we can
 have GADTs.<br>
-For example, we can have a vector <code>Nil</code> constructor return <code>Vec A O</code>,
+For example, we can have a vector's <code>Nil</code> constructor return <code>Vec A O</code>,
 while <code>Cons</code> would return <code>Vec A (S n)</code> for some natural number <code>n</code>.
 {{< /sidenote >}}
 `Either A B`.  We thus generated references to these parameters by simply generating the sequence
@@ -563,7 +578,7 @@ That's all for the various elaboration functions. Next for some bookkeeping!
 As we saw above, we use a state monad to keep track of the decreasing arguments
 of our potentially recursive functions. Each time we resolve a function, we
 must be careful to start fresh, without accidentally assuming that
-the decreasing parameters of the _previous_ function match that of the current
+the decreasing parameters of the _previous_ function match those of the current
 one. For this reason, we write a little helper to perform a monadic
 operation in a state with no recorded decreasing arguments, which
 we can conveniently use to get a "blank slate".
@@ -687,7 +702,7 @@ update this instance (specifically, the mapping of names to `Definition` instanc
 Next, we'll move a bit further into the process of resolution. Our next
 function, `insertLeading`, will take a list of parameter types (which
 can be either `Inferred` or `Explicit`, with `Inferred` parameters being
-guessed using unification and) and insert the appropriate number of
+guessed using unification) and insert the appropriate number of
 `Placeholder` instances, which will eventually be processed by the
 elaboration code. For now, we only handle the case of _leading_
 inferred arguments (that is, placeholders can only occur at the
@@ -803,7 +818,7 @@ a function `matchBranch` to find a `ResolveTerm` for a particular `Constructor`.
 When do variables actually decrease in size? In Maypop, this will happen
 during pattern matching. If a reference `l` is case analyzed into
 a head `x` and tail `xs`, then `x` and `xs` are smaller than `l`,
-since they make up parts of l. This logic is implemented by
+since they make up parts of `l`. This logic is implemented by
 `caseTermSize`, which, given a term that occurs as a scrutinee
 of a case expression, returns the `VarSize` that should be assigned
 to each variable introduced by the case expression's patterns.
@@ -859,7 +874,7 @@ via `insertLeading`. The other two cases require little further explanation.
 The second interesting case is that of case expressions. Here, we still
 perform resolution on subterms, but a little more setup is necessary:
 we need to determine whether or not we have to mark the newly introduced
-variables with a size. This is where our `resolveBranch` and matchBranch`
+variables with a size. This is where our `resolveBranch` and `matchBranch`
 functions come in: the former is used to process each branch in turn,
 and they are arranged in proper order by calling `matchBranch` for
 every constructor.
@@ -916,7 +931,7 @@ of the function's parameters (we do not use names in our final representation).
 Three cases are possible.
 
 1. We are not a recursive function. In this case, `dec` is `Nothing`,
-   and we simply return `Nothing`. A `Maybe` in a function's decreasing
+   and we simply return `Nothing`. A `Nothing` in a function's decreasing
    parameter field tells Maypop to use regular old beta reduction when
    evaluating it.
 2. We are a recursive function, and at least one argument is always
